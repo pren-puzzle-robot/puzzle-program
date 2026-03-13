@@ -33,7 +33,7 @@ class PuzzleOrchestrator:
         # frame = self.camera_controller.capture_frame()
         # logger.info("Captured frame: %s", frame)
         
-        frame = str(Path(__file__).parents[2] / "data" / "GOPR0281.JPG")
+        frame = str(Path(__file__).parents[2] / "data" / "with_aruco2_flattened.JPG")
         logger.info("Loaded frame: %s", frame)
 
         grid_path = self.puzzle_solver.solve(frame)

@@ -101,6 +101,91 @@ class CameraController:
         logger.info("Undistorted image written to %s", destination)
         return destination
 
+    def flatten_image_with_aruco(
+        self,
+        source: str | Path,
+        marker_ids: tuple[int, int, int, int] = (0, 1, 2, 3),
+        dictionary_name: str = "DICT_4X4_50",
+        output_size: tuple[int, int] | None = None,
+    ) -> str:
+        logger.info("Flattening image %s using ArUco markers %s", source, marker_ids)
+        if not hasattr(cv2, "aruco"):
+            raise RuntimeError("OpenCV ArUco module is not available")
+
+        source_path = Path(source)
+        image = cv2.imread(str(source_path))
+        if image is None:
+            raise RuntimeError(f"Unable to read image for flattening: {source_path}")
+
+        aruco = cv2.aruco
+        dictionary_id = getattr(aruco, dictionary_name, None)
+        if dictionary_id is None:
+            raise ValueError(f"Unknown ArUco dictionary: {dictionary_name}")
+
+        dictionary = aruco.getPredefinedDictionary(dictionary_id)
+        detector_parameters = aruco.DetectorParameters()
+        if hasattr(aruco, "ArucoDetector"):
+            detector = aruco.ArucoDetector(dictionary, detector_parameters)
+            corners, ids, _ = detector.detectMarkers(image)
+        else:
+            corners, ids, _ = aruco.detectMarkers(
+                image,
+                dictionary,
+                parameters=detector_parameters,
+            )
+
+        if ids is None:
+            raise RuntimeError("No ArUco markers detected in image")
+
+        marker_centers: dict[int, np.ndarray] = {}
+        for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
+            marker_centers[int(marker_id)] = marker_corner[0].mean(axis=0)
+
+        missing_marker_ids = [marker_id for marker_id in marker_ids if marker_id not in marker_centers]
+        if missing_marker_ids:
+            raise RuntimeError(f"Missing required ArUco markers: {missing_marker_ids}")
+
+        source_points = np.array(
+            [marker_centers[marker_id] for marker_id in marker_ids],
+            dtype=np.float32,
+        )
+
+        if output_size is None:
+            width_top = np.linalg.norm(source_points[1] - source_points[0])
+            width_bottom = np.linalg.norm(source_points[2] - source_points[3])
+            height_right = np.linalg.norm(source_points[2] - source_points[1])
+            height_left = np.linalg.norm(source_points[3] - source_points[0])
+            width = max(1, int(round(max(width_top, width_bottom))))
+            height = max(1, int(round(max(height_left, height_right))))
+        else:
+            width, height = output_size
+            if width <= 0 or height <= 0:
+                raise ValueError("output_size must contain positive dimensions")
+
+        destination_points = np.array(
+            [
+                [0.0, 0.0],
+                [width - 1.0, 0.0],
+                [width - 1.0, height - 1.0],
+                [0.0, height - 1.0],
+            ],
+            dtype=np.float32,
+        )
+
+        perspective_transform = cv2.getPerspectiveTransform(
+            source_points,
+            destination_points,
+        )
+        flattened = cv2.warpPerspective(image, perspective_transform, (width, height))
+
+        destination = source_path.with_stem(f"{source_path.stem}_flattened")
+        if not cv2.imwrite(str(destination), flattened):
+            raise RuntimeError(f"Unable to write flattened image: {destination}")
+
+        resolved_destination = str(destination.resolve())
+        logger.info("Flattened image written to %s", resolved_destination)
+        return resolved_destination
+
     def capture_frame(self) -> str:
         """
         Trigger a GoPro photo capture, download the latest image, and return local path.
