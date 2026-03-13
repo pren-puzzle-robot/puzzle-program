@@ -7,6 +7,9 @@ import time
 import urllib.parse
 import urllib.request
 
+import cv2
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,12 +21,18 @@ class CameraController:
         gopro_base_url: str = "http://10.5.5.9",
         media_base_url: str = "http://10.5.5.9:8080",
         download_dir: str = "captures",
+        calibration_file: str | None = None,
         capture_delay_seconds: float = 7.5,
         request_timeout_seconds: float = 5.0,
     ) -> None:
         self.gopro_base_url = gopro_base_url.rstrip("/")
         self.media_base_url = media_base_url.rstrip("/")
         self.download_dir = Path(download_dir)
+        self.calibration_file = (
+            Path(calibration_file)
+            if calibration_file is not None
+            else Path(__file__).with_name("calibration.npz")
+        )
         self.capture_delay_seconds = capture_delay_seconds
         self.request_timeout_seconds = request_timeout_seconds
 
@@ -68,6 +77,29 @@ class CameraController:
         req = urllib.request.Request(url=source_url, method="GET")
         with urllib.request.urlopen(req, timeout=self.request_timeout_seconds) as response:
             destination.write_bytes(response.read())
+
+    def _undistort_image(self, source: Path) -> Path:
+        logger.info("Undistorting captured image using calibration %s", self.calibration_file)
+        if not self.calibration_file.exists():
+            raise FileNotFoundError(
+                f"Calibration file not found: {self.calibration_file}"
+            )
+
+        data = np.load(self.calibration_file)
+        camera_matrix = data["camera_matrix"]
+        dist_coeffs = data["dist_coeffs"]
+
+        image = cv2.imread(str(source))
+        if image is None:
+            raise RuntimeError(f"Unable to read captured image: {source}")
+
+        undistorted = cv2.undistort(image, camera_matrix, dist_coeffs)
+        destination = source.with_stem(f"{source.stem}_undistorted")
+        if not cv2.imwrite(str(destination), undistorted):
+            raise RuntimeError(f"Unable to write undistorted image: {destination}")
+
+        logger.info("Undistorted image written to %s", destination)
+        return destination
 
     def capture_frame(self) -> str:
         """
@@ -122,6 +154,9 @@ class CameraController:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         destination = self.download_dir / latest_file
         self._download_file(source_url=media_url, destination=destination)
-        resolved_destination = str(destination.resolve())
-        logger.info("Captured image downloaded to %s", resolved_destination)
-        return resolved_destination
+        logger.info("Captured image downloaded to %s", destination.resolve())
+
+        # undistorted_destination = self._undistort_image(destination)
+        # resolved_destination = str(undistorted_destination.resolve())
+        # logger.info("Returning undistorted image at %s", resolved_destination)
+        return str(destination.resolve())
