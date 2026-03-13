@@ -20,12 +20,34 @@ def preprocess(img):
     gray = cv.cvtColor(blur, cv.COLOR_BGR2GRAY)
     return gray
 
-def segment_foreground(gray):
-    # Otsu threshold + morphology to isolate pieces
-    thr_val, bw = cv.threshold(gray, 0, 255, cv.THRESH_BINARY+cv.THRESH_OTSU)
-    # If background is white, invert so pieces are white
-    if np.mean(bw) > 127:
-        bw = cv.bitwise_not(bw)
+def _validate_threshold(threshold_value):
+    if threshold_value is None:
+        return None
+    if not 0 <= threshold_value <= 255:
+        raise ValueError("threshold_value must be between 0 and 255")
+    return threshold_value
+
+def _border_white_fraction(mask):
+    border = np.concatenate(
+        (mask[0, :], mask[-1, :], mask[:, 0], mask[:, -1])
+    )
+    return float(np.count_nonzero(border)) / float(border.size)
+
+def _select_foreground_polarity(mask):
+    inverted = cv.bitwise_not(mask)
+    # Puzzle pieces should usually not dominate the image border.
+    if _border_white_fraction(inverted) < _border_white_fraction(mask):
+        return inverted
+    return mask
+
+def segment_foreground(gray, threshold_value=None):
+    # Configurable threshold with Otsu fallback, followed by morphology to isolate pieces
+    threshold_value = _validate_threshold(threshold_value)
+    if threshold_value is None:
+        _, bw = cv.threshold(gray, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+    else:
+        _, bw = cv.threshold(gray, threshold_value, 255, cv.THRESH_BINARY)
+    bw = _select_foreground_polarity(bw)
     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5,5))
     bw = cv.morphologyEx(bw, cv.MORPH_OPEN, kernel, iterations=2)
     bw = cv.morphologyEx(bw, cv.MORPH_CLOSE, kernel, iterations=2)
@@ -39,6 +61,7 @@ def find_pieces(mask, min_area=2000):
     # label connected components via contours
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
     contours = [c for c in contours if cv.contourArea(c) >= min_area]
+    contours.sort(key=lambda c: cv.boundingRect(c)[:2])
     return contours
 
 def save_contours_only(img, contours, outdir):
@@ -66,16 +89,12 @@ def save_contours_only(img, contours, outdir):
 
     return summary, paths
 
-def pull_pieces(image, outdir, min_area=2000) -> list[str]:
+def pull_pieces(image, outdir, min_area=2000, threshold_value=None) -> list[str]:
     ensure_dir(outdir)
 
     gray = preprocess(image)
-    fg = segment_foreground(gray)
+    fg = segment_foreground(gray, threshold_value=threshold_value)
     contours = find_pieces(fg, min_area=min_area)
-
-    # optional: refine contours using Canny edges along the mask for crisper boundaries
-    edges = cv.Canny(gray, 60, 180)
-    edges = cv.bitwise_and(edges, edges, mask=fg)
 
     summary, paths = save_contours_only(image, contours, outdir)
     return paths
@@ -84,8 +103,14 @@ def pull_pieces(image, outdir, min_area=2000) -> list[str]:
 def main():
     ap = argparse.ArgumentParser(description="Detect puzzle piece edges and interlocks")
     ap.add_argument("--image", required=True, help="path to input image")
-    ap.add_argument("--outdir", default="outputs", help="folder to save results")
-    ap.add_argument("--min_area", type=int, default=2000, help="min contour area to keep")
+    ap.add_argument("--outdir", default="output", help="folder to save results")
+    ap.add_argument("--min_area", type=int, default=200000, help="min contour area to keep")
+    ap.add_argument(
+        "--threshold",
+        type=int,
+        default=None,
+        help="fixed grayscale threshold for foreground segmentation; defaults to Otsu",
+    )
     args = ap.parse_args()
 
     ensure_dir(args.outdir)
@@ -94,7 +119,12 @@ def main():
     if img is None:
         raise SystemExit(f"Could not read image: {args.image}")
     
-    paths = pull_pieces(img, args.outdir, min_area=args.min_area)
+    paths = pull_pieces(
+        img,
+        args.outdir,
+        min_area=args.min_area,
+        threshold_value=args.threshold,
+    )
     print(f"Saved {len(paths)} piece masks to {args.outdir}")
 
 if __name__ == "__main__":

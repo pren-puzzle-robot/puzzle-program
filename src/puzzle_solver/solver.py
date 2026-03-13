@@ -11,7 +11,7 @@ from .corners import detect_corners
 from .greedy import Greedy
 from .match import Match
 from .pull_pieces import pull_pieces
-from .utilities import Solver
+from .utilities import Solver, print_whole_puzzle_image
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,15 @@ class PuzzleSolver:
         self,
         output_dir: str | None = None,
         variant: str = "fast",
-        min_area: int = 2000,
+        min_area: int = 200000,
+        threshold_value: int | None = 140,
     ) -> None:
         self.output_dir = (
             Path(output_dir) if output_dir is not None else Path(__file__).with_name("output")
         )
         self.variant = variant
         self.min_area = min_area
+        self.threshold_value = threshold_value
 
     def _prepare_output_dir(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -57,6 +59,12 @@ class PuzzleSolver:
 
         return Match()
 
+    def _save_debug_image(self, puzzle_pieces: dict[int, PuzzlePiece]) -> None:
+        debug_image = print_whole_puzzle_image(puzzle_pieces)
+        debug_path = self.output_dir / "solved_puzzle.png"
+        debug_image.save(debug_path)
+        logger.info("Saved solved puzzle debug image to %s", debug_path)
+
     def solve(self, frame: str) -> list[tuple[int, int]]:
         """Run the current simulator-style solver pipeline for a captured image."""
         logger.info("Solving puzzle from frame %s", frame)
@@ -66,7 +74,12 @@ class PuzzleSolver:
         if image is None:
             raise RuntimeError(f"Could not read puzzle image: {frame}")
 
-        piece_images = pull_pieces(image, str(self.output_dir), min_area=self.min_area)
+        piece_images = pull_pieces(
+            image,
+            str(self.output_dir),
+            min_area=self.min_area,
+            threshold_value=self.threshold_value,
+        )
         logger.info("Extracted %d piece masks", len(piece_images))
 
         corners = detect_corners(piece_images, str(self.output_dir))
@@ -76,6 +89,7 @@ class PuzzleSolver:
         solver = self._create_solver(puzzle_pieces)
         ordered_piece_ids = solver.solve(puzzle_pieces)
         logger.info("Solver produced piece order %s", ordered_piece_ids)
+        self._save_debug_image(puzzle_pieces)
 
         solution = [
             (
