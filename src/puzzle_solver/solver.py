@@ -15,6 +15,8 @@ from .utilities import Solver, print_whole_puzzle_image
 
 logger = logging.getLogger(__name__)
 
+SolvedPiece = dict[str, object]
+
 
 class PuzzleSolver:
     """Contains puzzle-solving logic."""
@@ -65,7 +67,7 @@ class PuzzleSolver:
         debug_image.save(debug_path)
         logger.info("Saved solved puzzle debug image to %s", debug_path)
 
-    def solve(self, frame: str) -> list[tuple[int, int]]:
+    def solve(self, frame: str) -> list[SolvedPiece]:
         """Run the current simulator-style solver pipeline for a captured image."""
         logger.info("Solving puzzle from frame %s", frame)
         self._prepare_output_dir()
@@ -86,17 +88,29 @@ class PuzzleSolver:
         logger.info("Detected corners for %d pieces", len(corners))
 
         puzzle_pieces = self._build_puzzle_pieces(corners)
+        start_positions = {
+            piece_id: (
+                int(round(piece.polygon.centroid().x)),
+                int(round(piece.polygon.centroid().y)),
+            )
+            for piece_id, piece in puzzle_pieces.items()
+        }
         solver = self._create_solver(puzzle_pieces)
         ordered_piece_ids = solver.solve(puzzle_pieces)
         logger.info("Solver produced piece order %s", ordered_piece_ids)
         self._save_debug_image(puzzle_pieces)
 
         solution = [
-            (
-                int(round(puzzle_pieces[piece_id].polygon.centroid().x)),
-                int(round(puzzle_pieces[piece_id].polygon.centroid().y)),
-            )
+            {
+                "piece_id": piece_id,
+                "start": start_positions[piece_id],
+                "end": (
+                    int(round(puzzle_pieces[piece_id].polygon.centroid().x)),
+                    int(round(puzzle_pieces[piece_id].polygon.centroid().y)),
+                ),
+                "rotation": puzzle_pieces[piece_id].rotation,
+            }
             for piece_id in ordered_piece_ids
         ]
-        logger.debug("Solver centroid path: %s", solution)
+        logger.debug("Solver placement plan: %s", solution)
         return solution
