@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from camera_controller import CameraController
 from coordinate_mapper import CoordinateMapper
@@ -28,9 +29,12 @@ class PuzzleOrchestrator:
         )
 
     def run_once(self) -> str:
-        logger.info("Starting puzzle orchestration cycle")
-        frame = self.camera_controller.capture_frame()
-        logger.info("Captured frame: %s", frame)
+        # logger.info("Starting puzzle orchestration cycle")
+        # frame = self.camera_controller.capture_frame()
+        # logger.info("Captured frame: %s", frame)
+        
+        frame = str(Path(__file__).parents[2] / "data" / "sample_puzzle.JPG")
+        logger.info("Loaded frame: %s", frame)
 
         grid_path = self.puzzle_solver.solve(frame)
         logger.info("Solver produced %d grid points", len(grid_path))
