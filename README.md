@@ -36,6 +36,10 @@ The orchestrator is configured through environment variables.
 - Every sent command must receive `ACK` (`A`).
 - Next command is sent only after receiving `done` (`D`).
 - Any `error` (`E`) aborts execution immediately.
+- 
+## IP Adresses
+RaspberryPi: 192.168.50.2
+GoPro: 10.5.5.9
 
 ## Uart Interface
 Baudrate von Microcontroller: 57600

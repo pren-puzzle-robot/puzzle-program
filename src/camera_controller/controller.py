@@ -244,4 +244,7 @@ class CameraController:
         # undistorted_destination = self._undistort_image(destination)
         # resolved_destination = str(undistorted_destination.resolve())
         # logger.info("Returning undistorted image at %s", resolved_destination)
-        return str(destination.resolve())
+
+        flattened_destination = self.flatten_image_with_aruco(destination)
+        logger.info("Returning flattened image at %s", flattened_destination)
+        return flattened_destination
