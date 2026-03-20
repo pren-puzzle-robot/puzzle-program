@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant TinyK22@{ "type" : "boundary" }
+    
+    TinyK22 -)+ MicrocontrollerInterface: Start (S)
+    MicrocontrollerInterface --) TinyK22: ACK
+    MicrocontrollerInterface ->>+ PuzzleOrchestrator: Start execution 
+    deactivate MicrocontrollerInterface
+    activate PuzzleOrchestrator
+    PuzzleOrchestrator ->>+ CameraController: Capture frame
+    CameraController --)- PuzzleOrchestrator: Frame data
+    PuzzleOrchestrator ->>+ PuzzleSolver: Solve puzzle
+    PuzzleSolver --)- PuzzleOrchestrator: Solution
+    PuzzleOrchestrator ->>+ CoorinateMapper: Map solution to coordinates
+    CoorinateMapper --)- PuzzleOrchestrator: Coordinates
+
+    PuzzleOrchestrator ->> MicrocontrollerInterface: Send solution
+    deactivate PuzzleOrchestrator
+
+    activate MicrocontrollerInterface
+
+    MicrocontrollerInterface ->> MicrocontrollerInterface: Send Command
+    activate MicrocontrollerInterface
+
+    MicrocontrollerInterface ->>+ TinyK22: Send Command (Move/Lift etc.)
+    TinyK22 --) MicrocontrollerInterface: ACK
+    TinyK22 --) MicrocontrollerInterface: Done
+
+    deactivate MicrocontrollerInterface
+
+    MicrocontrollerInterface ->> PuzzleOrchestrator: Notify completion
+    deactivate MicrocontrollerInterface
+
