@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 class MicrocontrollerInterface:
     """Sends mapped coordinates to a microcontroller."""
 
+    def wait_for_start_command(self) -> None:
+        """
+        Wait for an external start trigger from the microcontroller.
+        Stub implementation starts immediately.
+        """
+        logger.info("No start command transport configured; starting immediately")
+
     def send_path(self, machine_points: list[dict[str, object]]) -> str:
         """
         Send the planned path to the microcontroller.

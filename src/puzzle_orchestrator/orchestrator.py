@@ -29,12 +29,16 @@ class PuzzleOrchestrator:
         )
 
     def run_once(self) -> str:
-        # logger.info("Starting puzzle orchestration cycle")
-        # frame = self.camera_controller.capture_frame()
-        # logger.info("Captured frame: %s", frame)
+        logger.info("Waiting for microcontroller start command")
+        self.microcontroller_interface.wait_for_start_command()
+        logger.info("Start command received; running orchestration cycle")
+
+        logger.info("Starting puzzle orchestration cycle")
+        frame = self.camera_controller.capture_frame()
+        logger.info("Captured frame: %s", frame)
         
-        frame = str(Path(__file__).parents[2] / "data" / "with_aruco2_flattened.JPG")
-        logger.info("Loaded frame: %s", frame)
+        # frame = str(Path(__file__).parents[2] / "data" / "with_aruco2_flattened.JPG")
+        # logger.info("Loaded frame: %s", frame)
 
         grid_path = self.puzzle_solver.solve(frame)
         logger.info("Solver produced %d placement steps", len(grid_path))
