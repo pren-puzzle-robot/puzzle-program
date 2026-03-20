@@ -76,8 +76,8 @@ class ManualUartConsole:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Manual UART console for puzzle commands.")
-    parser.add_argument("--port", required=True, help="UART port, for example COM3")
-    parser.add_argument("--baudrate", type=int, default=115200, help="UART baudrate")
+    parser.add_argument("--port", default="/dev/serial0", help="UART port, for example COM3")
+    parser.add_argument("--baudrate", type=int, default=57600, help="UART baudrate")
     parser.add_argument(
         "--timeout",
         type=float,
@@ -121,7 +121,7 @@ def main() -> None:
             if command in {"L", "l", "H", "h"}:
                 try:
                     console.send_simple(command)
-                    print(f"> sent {command}")
+                    print(f"> sent {command} (Acknowledged)")
                 except Exception as exc:
                     print(f"! {exc}")
                 continue
