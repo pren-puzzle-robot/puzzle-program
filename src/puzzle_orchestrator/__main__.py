@@ -1,6 +1,7 @@
 import logging
 import os
 
+from camera_controller import CameraController, MockCameraController
 from microcontroller_interface import (
     MicrocontrollerInterface,
     UartMicrocontrollerInterface,
@@ -51,10 +52,28 @@ def build_microcontroller_interface() -> MicrocontrollerInterface:
     )
 
 
+def build_camera_controller() -> CameraController | MockCameraController:
+    transport = os.getenv("PUZZLE_CAMERA_TRANSPORT", "gopro").strip().lower()
+    if transport == "mock":
+        image_path = os.getenv(
+            "PUZZLE_MOCK_CAMERA_IMAGE",
+            str(os.path.join(".", "data", "with_aruco2_flattened.JPG")),
+        )
+        return MockCameraController(image_path=image_path)
+    if transport != "gopro":
+        raise ValueError(
+            "PUZZLE_CAMERA_TRANSPORT must be 'gopro' or 'mock', "
+            f"got {transport!r}"
+        )
+
+    return CameraController()
+
+
 def main() -> None:
     configure_logging()
     logger = logging.getLogger(__name__)
     orchestrator = PuzzleOrchestrator(
+        camera_controller=build_camera_controller(),
         microcontroller_interface=build_microcontroller_interface()
     )
     try:

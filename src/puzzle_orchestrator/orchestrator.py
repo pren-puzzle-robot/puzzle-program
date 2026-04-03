@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from camera_controller import CameraController
 from coordinate_mapper import CoordinateMapper
@@ -36,9 +35,6 @@ class PuzzleOrchestrator:
         logger.info("Starting puzzle orchestration cycle")
         frame = self.camera_controller.capture_frame()
         logger.info("Captured frame: %s", frame)
-        
-        # frame = str(Path(__file__).parents[2] / "data" / "with_aruco2_flattened.JPG")
-        # logger.info("Loaded frame: %s", frame)
 
         grid_path = self.puzzle_solver.solve(frame)
         logger.info("Solver produced %d placement steps", len(grid_path))
