@@ -73,35 +73,46 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
         logger.info("Received start command '%s'", START_COMMAND.value)
 
     def send_path(self, machine_points: list[MachinePlacement]) -> str:
-        """
-        Sample transport of placement data as discrete UART commands.
-
-        Assumption:
-        - `M` encodes target end position and rotation as three uint16 values.
-        - `L`, `l`, `H`, `h` are available via `send_command(...)` for external use.
-        """
         logger.info(
-            "Sending %d machine placements over UART as discrete commands",
+            "Sending %d machine placements over UART as pick-and-place sequences",
             len(machine_points),
         )
         logger.debug("UART placement payload: %s", machine_points)
 
         with self._handler.open_serial() as connection:
             for placement in machine_points:
-                command = MoveCommand(
+                start_move = MoveCommand(
+                    x=int(round(float(placement.start[0]))),
+                    y=int(round(float(placement.start[1]))),
+                    rotation=0,
+                )
+                end_move = MoveCommand(
                     x=int(round(float(placement.end[0]))),
                     y=int(round(float(placement.end[1]))),
                     rotation=int(round(float(placement.rotation))),
                 )
-                logger.info(
-                    "Sending move command x=%d y=%d rotation=%d and waiting for done",
-                    command.x,
-                    command.y,
-                    command.rotation,
-                )
-                self._handler.send_move(connection, command)
 
-        result = f"sent_{len(machine_points)}_move_commands_over_uart"
+                logger.info(
+                    "Picking piece %s: move to start (%d, %d), pick, move to destination (%d, %d), place with rotation %d",
+                    placement.piece_id,
+                    start_move.x,
+                    start_move.y,
+                    end_move.x,
+                    end_move.y,
+                    end_move.rotation,
+                )
+
+                self._handler.send_move(connection, start_move)
+                self._handler.send_simple_command(connection, SimpleSendCommand.LOWER)
+                self._handler.send_simple_command(connection, SimpleSendCommand.HOLD_ON)
+                self._handler.send_simple_command(connection, SimpleSendCommand.LIFT)
+
+                self._handler.send_move(connection, end_move)
+                self._handler.send_simple_command(connection, SimpleSendCommand.LOWER)
+                self._handler.send_simple_command(connection, SimpleSendCommand.HOLD_OFF)
+                self._handler.send_simple_command(connection, SimpleSendCommand.LIFT)
+
+        result = f"sent_{len(machine_points)}_pick_and_place_sequences_over_uart"
         logger.info("UART send completed with result=%s", result)
         return result
 
