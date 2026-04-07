@@ -4,23 +4,26 @@ import argparse
 import threading
 import time
 
-from .uart_interface import ACK, RECEIVE_COMMANDS
+from .uart_handler import (
+    MoveCommand,
+    RECEIVE_COMMANDS,
+    SimpleSendCommand,
+    UartHandler,
+)
 
 
 class ManualUartConsole:
     def __init__(self, port: str, baudrate: int, timeout_seconds: float) -> None:
-        try:
-            import serial
-        except ImportError as exc:
-            raise RuntimeError("pyserial is required for the manual UART console") from exc
-
-        self._serial = serial.Serial(
+        self._handler = UartHandler(
             port=port,
             baudrate=baudrate,
-            timeout=timeout_seconds,
+            timeout_seconds=timeout_seconds,
+            ack_timeout_seconds=2.0,
+            done_timeout_seconds=2.0,
         )
+        self._serial = self._handler.open_serial()
         self._stop_event = threading.Event()
-        self._ack_event = threading.Event()
+        self._serial_lock = threading.Lock()
         self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
 
     def start(self) -> None:
@@ -33,45 +36,47 @@ class ManualUartConsole:
 
     def _read_loop(self) -> None:
         while not self._stop_event.is_set():
-            raw = self._serial.read(1)
-            if not raw:
+            if not self._serial_lock.acquire(timeout=0.05):
                 continue
-
-            if raw == ACK:
-                self._ack_event.set()
-                continue
-
             try:
-                code = raw.decode("ascii")
-            except UnicodeDecodeError:
-                print(f"< invalid byte {raw!r}")
-                continue
+                try:
+                    raw = self._handler.read_byte(self._serial)
+                except TimeoutError:
+                    continue
 
-            if code in RECEIVE_COMMANDS:
-                print(f"< {code}")
-            else:
-                print(f"< unexpected {code!r}")
+                try:
+                    code = self._handler.decode_byte(raw)
+                except RuntimeError:
+                    print(f"< invalid byte {raw!r}")
+                    continue
 
-    def _send_and_wait_for_ack(self, payload: bytes) -> None:
-        self._ack_event.clear()
-        self._serial.write(payload)
-        self._serial.flush()
+                if code in RECEIVE_COMMANDS:
+                    print(f"< {code.value}")
+                else:
+                    print(f"< unexpected {code!r}")
+            finally:
+                self._serial_lock.release()
 
-        if not self._ack_event.wait(timeout=2.0):
-            raise RuntimeError("Timed out waiting for ACK")
-
-    def send_simple(self, command: str) -> None:
-        self._send_and_wait_for_ack(command.encode("ascii"))
+    def send_simple(self, command: SimpleSendCommand) -> None:
+        with self._serial_lock:
+            self._handler.send_simple_command(self._serial, command)
 
     def send_move(self, x: int, y: int, rotation: int) -> None:
-        import struct
+        with self._serial_lock:
+            self._handler.send_move(
+                self._serial,
+                MoveCommand(x=x, y=y, rotation=rotation),
+            )
 
-        for name, value in (("x", x), ("y", y), ("rotation", rotation)):
-            if not 0 <= value <= 0xFFFF:
-                raise ValueError(f"{name} must be in range 0..65535")
-
-        payload = b"M" + struct.pack("<HHH", x, y, rotation)
-        self._send_and_wait_for_ack(payload)
+    @staticmethod
+    def parse_simple_command(raw: str) -> SimpleSendCommand | None:
+        mapping = {
+            "L": SimpleSendCommand.LIFT,
+            "l": SimpleSendCommand.LOWER,
+            "H": SimpleSendCommand.HOLD_ON,
+            "h": SimpleSendCommand.HOLD_OFF,
+        }
+        return mapping.get(raw)
 
 
 def main() -> None:
@@ -118,10 +123,11 @@ def main() -> None:
                     print(f"! {exc}")
                 continue
 
-            if command in {"L", "l", "H", "h"}:
+            simple_command = console.parse_simple_command(command)
+            if simple_command is not None:
                 try:
-                    console.send_simple(command)
-                    print(f"> sent {command} (Acknowledged)")
+                    console.send_simple(simple_command)
+                    print(f"> sent {simple_command.value} (Acknowledged)")
                 except Exception as exc:
                     print(f"! {exc}")
                 continue
