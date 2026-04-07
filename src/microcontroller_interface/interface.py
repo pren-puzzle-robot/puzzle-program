@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from puzzle_models import MachinePlacement
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,7 +17,7 @@ class MicrocontrollerInterface:
         """
         logger.info("No start command transport configured; starting immediately")
 
-    def send_path(self, machine_points: list[dict[str, object]]) -> str:
+    def send_path(self, machine_points: list[MachinePlacement]) -> str:
         """
         Send the planned path to the microcontroller.
         Replace this stub with serial/CAN/UART communication logic.

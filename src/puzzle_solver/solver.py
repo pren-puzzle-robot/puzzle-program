@@ -6,6 +6,8 @@ import shutil
 
 import cv2 as cv
 
+from puzzle_models import SolverPlacement
+
 from .component import PuzzlePiece, Point
 from .corners import detect_corners
 from .greedy import Greedy
@@ -14,8 +16,6 @@ from .pull_pieces import pull_pieces
 from .utilities import Solver, print_whole_puzzle_image
 
 logger = logging.getLogger(__name__)
-
-SolvedPiece = dict[str, object]
 
 
 class PuzzleSolver:
@@ -67,7 +67,7 @@ class PuzzleSolver:
         debug_image.save(debug_path)
         logger.info("Saved solved puzzle debug image to %s", debug_path)
 
-    def solve(self, frame: str) -> list[SolvedPiece]:
+    def solve(self, frame: str) -> list[SolverPlacement]:
         """Run the current simulator-style solver pipeline for a captured image."""
         logger.info("Solving puzzle from frame %s", frame)
         self._prepare_output_dir()
@@ -101,15 +101,18 @@ class PuzzleSolver:
         self._save_debug_image(puzzle_pieces)
 
         solution = [
-            {
-                "piece_id": piece_id,
-                "start": start_positions[piece_id],
-                "end": (
-                    int(round(puzzle_pieces[piece_id].polygon.centroid().x)),
-                    int(round(puzzle_pieces[piece_id].polygon.centroid().y)),
+            SolverPlacement(
+                piece_id=piece_id,
+                start=(
+                    float(start_positions[piece_id][0]),
+                    float(start_positions[piece_id][1]),
                 ),
-                "rotation": puzzle_pieces[piece_id].rotation,
-            }
+                end=(
+                    float(round(puzzle_pieces[piece_id].polygon.centroid().x)),
+                    float(round(puzzle_pieces[piece_id].polygon.centroid().y)),
+                ),
+                rotation=float(puzzle_pieces[piece_id].rotation),
+            )
             for piece_id in ordered_piece_ids
         ]
         logger.debug("Solver placement plan: %s", solution)

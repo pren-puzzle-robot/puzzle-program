@@ -5,6 +5,8 @@ import struct
 import time
 from dataclasses import dataclass
 
+from puzzle_models import MachinePlacement
+
 from .interface import MicrocontrollerInterface
 
 logger = logging.getLogger(__name__)
@@ -166,7 +168,7 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
         self._wait_for_ack(connection)
         self._wait_for_event(connection, {DONE_COMMAND}, timeout_seconds=self.done_timeout_seconds)
 
-    def send_path(self, machine_points: list[dict[str, object]]) -> str:
+    def send_path(self, machine_points: list[MachinePlacement]) -> str:
         """
         Sample transport of placement data as discrete UART commands.
 
@@ -182,9 +184,9 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
 
         with self._open_serial() as connection:
             for placement in machine_points:
-                end_x = int(round(float(placement["end"][0])))
-                end_y = int(round(float(placement["end"][1])))
-                rotation = int(round(float(placement["rotation"])))
+                end_x = int(round(float(placement.end[0])))
+                end_y = int(round(float(placement.end[1])))
+                rotation = int(round(float(placement.rotation)))
                 end_x = self._require_uint16(end_x, "x")
                 end_y = self._require_uint16(end_y, "y")
                 rotation = self._require_uint16(rotation, "rotation")
