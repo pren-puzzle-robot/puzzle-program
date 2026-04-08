@@ -21,7 +21,7 @@ def preprocess(img):
     return gray
 
 def _validate_threshold(threshold_value):
-    if threshold_value is None:
+    if threshold_value is None or threshold_value == "otsu":
         return None
     if not 0 <= threshold_value <= 255:
         raise ValueError("threshold_value must be between 0 and 255")
@@ -107,7 +107,6 @@ def main():
     ap.add_argument("--min_area", type=int, default=200000, help="min contour area to keep")
     ap.add_argument(
         "--threshold",
-        type=int,
         default=None,
         help="fixed grayscale threshold for foreground segmentation; defaults to Otsu",
     )

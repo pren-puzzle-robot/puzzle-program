@@ -57,6 +57,8 @@ The orchestrator is configured through environment variables.
 | `PUZZLE_UART_WAIT_FOR_START` | `false` | If set to `true`, `1`, or `yes`, the UART interface waits for the microcontroller start signal before execution begins. |
 | `PUZZLE_CAMERA_TRANSPORT` | `gopro` | Camera backend. Supported values: `gopro`, `mock`. |
 | `PUZZLE_MOCK_CAMERA_IMAGE` | `./data/with_aruco2_flattened.JPG` | Image path used when `PUZZLE_CAMERA_TRANSPORT=mock`. This path is relative to the current working directory unless you provide an absolute path. |
+| `PUZZLE_SOLVER_MIN_AREA` | `200000` | Minimum contour area passed to `PuzzleSolver` when no explicit constructor argument is provided. |
+| `PUZZLE_SOLVER_THRESHOLD` | `140` | `0` - `255`, `otsu`. Fixed grayscale threshold passed to `PuzzleSolver` when no explicit constructor argument is provided. Set to `none` or `otsu` to use Otsu thresholding instead. |
 
 ### Root folder setup
 
