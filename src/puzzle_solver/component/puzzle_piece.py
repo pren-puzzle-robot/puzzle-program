@@ -1,9 +1,12 @@
 from __future__ import annotations
+import logging
 from typing import Iterable, List
 
 from .point import Point
 from .polygon import Polygon
 from .outer_edge import OuterEdge, PieceType
+
+logger = logging.getLogger(__name__)
 
 
 class PuzzlePiece:
@@ -166,7 +169,7 @@ class PuzzlePiece:
         dy = to_point.y - from_point.y
 
         self._translation = (self._translation[0] + dx, self._translation[1] + dy)
-        print("Translation:", self._translation)
+        logger.debug("Translation: %s", self._translation)
 
         self._polygon.translate(dx, dy)
         self._possible_outer_edges = [

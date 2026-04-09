@@ -1,6 +1,7 @@
 """Main simulator module. Orchestrates the simulation process."""
 
 import argparse
+import logging
 import os
 import cv2 as cv
 
@@ -11,6 +12,8 @@ from .utilities.draw_puzzle_piece import print_whole_puzzle_image
 from .utilities import Solver
 from .match import Match
 from .greedy import Greedy
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -53,7 +56,7 @@ def main():
 
     # Step 2: Analyze pieces and detect corners
     corners = detect_corners(piece_images, args.outdir)
-    print(f"Detected corners for {len(corners)} pieces, saved to {args.outdir}")
+    logger.info("Detected corners for %d pieces, saved to %s", len(corners), args.outdir)
 
     # Step 3: create PuzzlePiece objects, analyze edges, etc.
     puzzle_pieces = {}
@@ -61,7 +64,7 @@ def main():
         points = [Point(x=float(x), y=float(y)) for x, y in corner_list]
         piece = PuzzlePiece(points)
         puzzle_pieces[i] = piece
-        print(f"Created PuzzlePiece from {filename}: {piece}")
+        logger.debug("Created PuzzlePiece from %s: %s", filename, piece)
 
     # Step 4: Solve the puzzle
     solver: Solver
@@ -90,8 +93,12 @@ def ensure_out_dir(outdir: str) -> None:
             if os.path.isfile(file_path) or os.path.islink(file_path):
                 os.unlink(file_path)
         except Exception as e:
-            print(f"Failed to delete {file_path}. Reason: {e}")
+            logger.warning("Failed to delete %s. Reason: %s", file_path, e)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     main()

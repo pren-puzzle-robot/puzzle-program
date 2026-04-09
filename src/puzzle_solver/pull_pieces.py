@@ -2,8 +2,11 @@
 
 # python .\pull_pieces.py --image ..\sample_images\simple_1_rotated.png --outdir ..\output
 import argparse, json, os
+import logging
 import cv2 as cv
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 def ensure_dir(p):
     os.makedirs(p, exist_ok=True)
@@ -154,7 +157,11 @@ def main():
         min_area=args.min_area,
         threshold_value=args.threshold,
     )
-    print(f"Saved {len(paths)} piece masks to {args.outdir}")
+    logger.info("Saved %d piece masks to %s", len(paths), args.outdir)
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     main()

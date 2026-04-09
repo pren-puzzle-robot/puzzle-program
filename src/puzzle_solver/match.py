@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 
@@ -9,6 +10,8 @@ from .component import PuzzlePiece, Point, OuterEdge
 from .utilities import Solver
 from .utilities.draw_puzzle_piece import print_whole_puzzle_image
 from .utilities.puzzle_piece_loader import PuzzlePieceLoader
+
+logger = logging.getLogger(__name__)
 
 class Match(Solver):
 
@@ -39,14 +42,20 @@ class Match(Solver):
         start = time.perf_counter()
         order = cls.solve_greedily(first_corner, puzzle)
         end = time.perf_counter()
-        print("Time taken (s): ", end - start)
-        print("Solved order:", order)
-        print("Number of pieces:", len(order))
-        print("Rotation of pieces (radians):", [puzzle[pid].rotation for pid in order])
+        logger.info("Time taken (s): %.6f", end - start)
+        logger.info("Solved order: %s", order)
+        logger.info("Number of pieces: %d", len(order))
+        logger.debug(
+            "Rotation of pieces (radians): %s",
+            [puzzle[pid].rotation for pid in order],
+        )
 
         cls.move_pieces_to_fit(order, puzzle)
 
-        print("Outer edges after moving:", "\n\n".join(str(puzzle[pid].outer_edge.edges) for pid in order))
+        logger.debug(
+            "Outer edges after moving: %s",
+            "\n\n".join(str(puzzle[pid].outer_edge.edges) for pid in order),
+        )
         return order
 
     @classmethod
@@ -60,7 +69,7 @@ class Match(Solver):
                     remaining_pieces: dict[int, PuzzlePiece],
                     placed_order: list[int]) -> None:
             if not remaining_pieces:
-                print("All pieces processed. Order:", placed_order)
+                logger.info("All pieces processed. Order: %s", placed_order)
                 return
 
             score = 0
@@ -87,12 +96,16 @@ class Match(Solver):
                     for outer_edge in piece.possible_outer_edges:
                         piece._outer_edge = outer_edge
                         next_piece = cls.rotate_to_fit(current_piece, piece)
-                        print(f"Rotated piece {pid} to fit.")
+                        logger.debug("Rotated piece %d to fit.", pid)
 
                         def check_match(additional_rotation: float = 0.0) -> None:
                             nonlocal score, best_score, best_pid, best_piece, best_outer_edge, best_current_outer_edge, best_additional_rotation
                             score = cls.get_amount_of_matching_points(current_piece, next_piece)
-                            print(f"Piece {pid} has {score} matching points with current piece.")
+                            logger.debug(
+                                "Piece %d has %d matching points with current piece.",
+                                pid,
+                                score,
+                            )
 
                             if score > best_score:
                                 best_score = score
@@ -109,8 +122,6 @@ class Match(Solver):
 
                         next_piece.rotate(-math.pi / 2)
                         check_match(-math.pi / 2)
-
-            print()
 
             # Use the best matching piece as the next current
             assert (best_pid is not None

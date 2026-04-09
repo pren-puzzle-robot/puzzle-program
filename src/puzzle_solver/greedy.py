@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 
 from .component import PuzzlePiece, Point
 from .utilities import print_whole_puzzle_image, Solver
 from .utilities.puzzle_piece_loader import PuzzlePieceLoader
+
+logger = logging.getLogger(__name__)
 
 
 class Greedy(Solver):
@@ -34,13 +37,13 @@ class Greedy(Solver):
         result = solver.solve_greedy_corner_matching()
 
         if result is not None:
-            print(result)
+            logger.info("Greedy solver result: %s", result)
             solver.align_whole_puzzle(result)
             print_whole_puzzle_image(puzzle)
             ordered_piece_ids = list(dict.fromkeys(piece_id for piece_id, _ in result))
             return ordered_piece_ids
         else:
-            print("ERROR")
+            logger.error("Greedy solver did not find a valid solution")
             return []
 
     def align_whole_puzzle(self, solution: list[tuple[int, tuple[int, int]]]) -> None:
@@ -96,7 +99,7 @@ class Greedy(Solver):
         result: list[tuple[int, tuple[int, int]]] = []
         limits: list[tuple[int, int]] = self.puzzle[index].get_possible_limits()
 
-        print(limits)
+        logger.debug("Possible limits for first corner piece %d: %s", index, limits)
 
         for limit in limits:
             origin_edge: tuple[int, bool, tuple[int, int]] = (index, direction, limit)

@@ -1,9 +1,12 @@
 import cv2
 import numpy as np
 import sys, os, json
+import logging
 from math import acos, degrees
 from glob import glob
 import re
+
+logger = logging.getLogger(__name__)
 
 def filter_by_turn_angle(pts, min_turn_deg=45.0):
     """
@@ -104,13 +107,13 @@ def detect_corners_for_piece(
 ):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        print(f"Error: could not open {image_path}")
+        logger.error("Could not open %s", image_path)
         return None
 
     _, bw = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not cnts:
-        print(f"No contour found in {image_path}")
+        logger.warning("No contour found in %s", image_path)
         return None
 
     cnt = max(cnts, key=cv2.contourArea)
@@ -166,7 +169,11 @@ if __name__ == "__main__":
     approx_frac = 0.002   # bigger = more simplification
     min_turn_deg = 30.0   # bigger = fewer corners, only sharp ones
 
-    print(f"Scanning folder: {src_folder}")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logger.info("Scanning folder: %s", src_folder)
     images = [
         f for f in glob(os.path.join(src_folder, "piece_*.png"))
         if re.fullmatch(r".*piece_\d+\.png", f)
@@ -174,7 +181,7 @@ if __name__ == "__main__":
     results = []
 
     if not images:
-        print("No piece_*.png files found.")
+        logger.error("No piece_*.png files found.")
         sys.exit(1)
 
     for img_path in images:
@@ -198,4 +205,4 @@ if __name__ == "__main__":
     # Save all results to JSON
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
-    print(f"\nSaved all corners to {output_json}")
+    logger.info("Saved all corners to %s", output_json)
