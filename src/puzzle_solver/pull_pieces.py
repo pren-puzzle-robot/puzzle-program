@@ -20,9 +20,32 @@ def preprocess(img):
     gray = cv.cvtColor(blur, cv.COLOR_BGR2GRAY)
     return gray
 
+def _validate_min_area(min_area):
+    try:
+        resolved_min_area = int(min_area)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("min_area must be an integer") from exc
+
+    if resolved_min_area < 0:
+        raise ValueError("min_area must be non-negative")
+
+    return resolved_min_area
+
 def _validate_threshold(threshold_value):
-    if threshold_value is None or threshold_value == "otsu":
+    if threshold_value is None:
         return None
+
+    if isinstance(threshold_value, str):
+        normalized = threshold_value.strip().lower()
+        if normalized in {"", "none", "otsu"}:
+            return None
+        try:
+            threshold_value = int(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                "threshold_value must be an integer, 'none', or 'otsu'"
+            ) from exc
+
     if not 0 <= threshold_value <= 255:
         raise ValueError("threshold_value must be between 0 and 255")
     return threshold_value
@@ -59,6 +82,7 @@ def segment_foreground(gray, threshold_value=None):
 
 def find_pieces(mask, min_area=2000):
     # label connected components via contours
+    min_area = _validate_min_area(min_area)
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
     contours = [c for c in contours if cv.contourArea(c) >= min_area]
     contours.sort(key=lambda c: cv.boundingRect(c)[:2])

@@ -13,56 +13,6 @@ from .match import Match
 from .greedy import Greedy
 
 
-def _resolve_min_area(value: int | None) -> int:
-    if value is not None:
-        return value
-
-    raw_value = os.getenv("PUZZLE_SOLVER_MIN_AREA")
-    if raw_value is None:
-        return 200000
-
-    try:
-        return int(raw_value)
-    except ValueError as exc:
-        raise SystemExit("PUZZLE_SOLVER_MIN_AREA must be an integer") from exc
-
-
-def _resolve_threshold(value: str | None) -> int | None:
-    if value is not None:
-        normalized = value.strip().lower()
-        if normalized in {"", "none", "otsu"}:
-            return None
-
-        try:
-            threshold_value = int(value)
-        except ValueError as exc:
-            raise SystemExit("--threshold must be an integer, 'none', or 'otsu'") from exc
-
-        if not 0 <= threshold_value <= 255:
-            raise SystemExit("--threshold must be between 0 and 255")
-        return threshold_value
-
-    raw_value = os.getenv("PUZZLE_SOLVER_THRESHOLD")
-    if raw_value is None:
-        return 140
-
-    normalized = raw_value.strip().lower()
-    if normalized in {"", "none", "otsu"}:
-        return None
-
-    try:
-        threshold_value = int(raw_value)
-    except ValueError as exc:
-        raise SystemExit(
-            "PUZZLE_SOLVER_THRESHOLD must be an integer, 'none', or 'otsu'"
-        ) from exc
-
-    if not 0 <= threshold_value <= 255:
-        raise SystemExit("PUZZLE_SOLVER_THRESHOLD must be between 0 and 255")
-
-    return threshold_value
-
-
 def main():
     ap = argparse.ArgumentParser(description="Simulate puzzle assembly process")
     ap.add_argument("--image", required=True, help="path to input image")
@@ -76,8 +26,8 @@ def main():
     ap.add_argument(
         "--min_area",
         type=int,
-        default=None,
-        help="minimum contour area to keep; defaults to PUZZLE_SOLVER_MIN_AREA or 200000",
+        default=200000,
+        help="minimum contour area to keep",
     )
     ap.add_argument(
         "--threshold",
@@ -97,8 +47,8 @@ def main():
     piece_images = pull_pieces(
         img,
         args.outdir,
-        min_area=_resolve_min_area(args.min_area),
-        threshold_value=_resolve_threshold(args.threshold),
+        min_area=args.min_area,
+        threshold_value=args.threshold,
     )
 
     # Step 2: Analyze pieces and detect corners

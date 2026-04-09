@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import shutil
 
@@ -17,46 +16,6 @@ from .pull_pieces import pull_pieces
 from .utilities import Solver, print_whole_puzzle_image
 
 logger = logging.getLogger(__name__)
-_UNSET = object()
-
-
-def _resolve_min_area(value: int | object) -> int:
-    if value is not _UNSET:
-        return value
-
-    raw_value = os.getenv("PUZZLE_SOLVER_MIN_AREA")
-    if raw_value is None:
-        return 200000
-
-    try:
-        return int(raw_value)
-    except ValueError as exc:
-        raise ValueError("PUZZLE_SOLVER_MIN_AREA must be an integer") from exc
-
-
-def _resolve_threshold_value(value: int | None | object) -> int | None:
-    if value is not _UNSET:
-        return value
-
-    raw_value = os.getenv("PUZZLE_SOLVER_THRESHOLD")
-    if raw_value is None:
-        return 140
-
-    normalized = raw_value.strip().lower()
-    if normalized in {"", "none", "otsu"}:
-        return None
-
-    try:
-        threshold_value = int(raw_value)
-    except ValueError as exc:
-        raise ValueError(
-            "PUZZLE_SOLVER_THRESHOLD must be an integer, 'none', or 'otsu'"
-        ) from exc
-
-    if not 0 <= threshold_value <= 255:
-        raise ValueError("PUZZLE_SOLVER_THRESHOLD must be between 0 and 255")
-
-    return threshold_value
 
 
 class PuzzleSolver:
@@ -66,15 +25,15 @@ class PuzzleSolver:
         self,
         output_dir: str | None = None,
         variant: str = "fast",
-        min_area: int | object = _UNSET,
-        threshold_value: int | None | object = _UNSET,
+        min_area: int = 200000,
+        threshold_value: int | str | None = 140,
     ) -> None:
         self.output_dir = (
             Path(output_dir) if output_dir is not None else Path(__file__).with_name("output")
         )
         self.variant = variant
-        self.min_area = _resolve_min_area(min_area)
-        self.threshold_value = _resolve_threshold_value(threshold_value)
+        self.min_area = min_area
+        self.threshold_value = threshold_value
 
     def _prepare_output_dir(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
