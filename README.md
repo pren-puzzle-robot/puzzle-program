@@ -9,6 +9,7 @@ Python project scaffold for puzzle orchestration.
 - `src/puzzle_solver`: `PuzzleSolver` package
 - `src/coordinate_mapper`: `CoordinateMapper` package
 - `src/microcontroller_interface`: `MicrocontrollerInterface` package
+- `src/puzzle_models`: Shared Models for other packages
 
 ## Run
 
@@ -19,10 +20,6 @@ python -m puzzle_orchestrator
 
 If you want to set one variable for the current PowerShell session, use:
 
-```powershell
-$env:VARIABLE_NAME = "value"
-```
-
 Example:
 
 ```powershell
@@ -30,10 +27,6 @@ $env:PUZZLE_CAMERA_TRANSPORT = "mock"
 ```
 
 If you want to set one variable for the current Bash session, use:
-
-```bash
-export VARIABLE_NAME="value"
-```
 
 Example:
 
