@@ -2,10 +2,13 @@ import logging
 import os
 
 from camera_controller import CameraController, MockCameraController
+from coordinate_mapper import CoordinateMapper
 from microcontroller_interface import (
     MicrocontrollerInterface,
     UartMicrocontrollerInterface,
 )
+from puzzle_models import CameraPort, CoordinateMapperPort, MicrocontrollerPort, PuzzleSolverPort
+from puzzle_solver import PuzzleSolver
 
 from .orchestrator import PuzzleOrchestrator
 
@@ -19,7 +22,7 @@ def configure_logging() -> None:
     )
 
 
-def build_microcontroller_interface() -> MicrocontrollerInterface:
+def build_microcontroller_interface() -> MicrocontrollerPort:
     transport = os.getenv("PUZZLE_MICROCONTROLLER_TRANSPORT", "uart").strip().lower()
     if transport == "stub":
         return MicrocontrollerInterface()
@@ -52,7 +55,7 @@ def build_microcontroller_interface() -> MicrocontrollerInterface:
     )
 
 
-def build_camera_controller() -> CameraController | MockCameraController:
+def build_camera_controller() -> CameraPort:
     transport = os.getenv("PUZZLE_CAMERA_TRANSPORT", "gopro").strip().lower()
     if transport == "mock":
         image_path = os.getenv(
@@ -68,12 +71,24 @@ def build_camera_controller() -> CameraController | MockCameraController:
 
     return CameraController()
 
+def build_puzzle_solver() -> PuzzleSolverPort:
+    return PuzzleSolver(
+        min_area=os.getenv("PUZZLE_SOLVER_MIN_AREA", "200000"),
+        threshold_value=os.getenv("PUZZLE_SOLVER_THRESHOLD", "140"),
+    )
+
+
+def build_coordinate_mapper() -> CoordinateMapperPort:
+    return CoordinateMapper()
+
 
 def main() -> None:
     configure_logging()
     logger = logging.getLogger(__name__)
     orchestrator = PuzzleOrchestrator(
         camera_controller=build_camera_controller(),
+        puzzle_solver=build_puzzle_solver(),
+        coordinate_mapper=build_coordinate_mapper(),
         microcontroller_interface=build_microcontroller_interface()
     )
     try:

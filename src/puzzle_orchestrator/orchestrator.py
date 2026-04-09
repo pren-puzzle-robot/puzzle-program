@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from camera_controller import CameraController
-from coordinate_mapper import CoordinateMapper
-from microcontroller_interface import MicrocontrollerInterface
-from puzzle_solver import PuzzleSolver
+from puzzle_models import (
+    CameraPort,
+    CoordinateMapperPort,
+    MicrocontrollerPort,
+    PuzzleSolverPort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,17 +17,15 @@ class PuzzleOrchestrator:
 
     def __init__(
         self,
-        camera_controller: CameraController | None = None,
-        puzzle_solver: PuzzleSolver | None = None,
-        coordinate_mapper: CoordinateMapper | None = None,
-        microcontroller_interface: MicrocontrollerInterface | None = None,
+        camera_controller: CameraPort,
+        puzzle_solver: PuzzleSolverPort,
+        coordinate_mapper: CoordinateMapperPort,
+        microcontroller_interface: MicrocontrollerPort,
     ) -> None:
-        self.camera_controller = camera_controller or CameraController()
-        self.puzzle_solver = puzzle_solver or PuzzleSolver()
-        self.coordinate_mapper = coordinate_mapper or CoordinateMapper()
-        self.microcontroller_interface = (
-            microcontroller_interface or MicrocontrollerInterface()
-        )
+        self.camera_controller = camera_controller
+        self.puzzle_solver = puzzle_solver
+        self.coordinate_mapper = coordinate_mapper
+        self.microcontroller_interface = microcontroller_interface
 
     def run_once(self) -> str:
         logger.info("Waiting for microcontroller start command")

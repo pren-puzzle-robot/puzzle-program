@@ -21,6 +21,9 @@ def preprocess(img):
     return gray
 
 def _validate_min_area(min_area):
+    if isinstance(min_area, str):
+        min_area = min_area.strip()
+
     try:
         resolved_min_area = int(min_area)
     except (TypeError, ValueError) as exc:
@@ -45,6 +48,9 @@ def _validate_threshold(threshold_value):
             raise ValueError(
                 "threshold_value must be an integer, 'none', or 'otsu'"
             ) from exc
+
+    if not isinstance(threshold_value, int):
+        raise ValueError("threshold_value must be an integer, 'none', or 'otsu'")
 
     if not 0 <= threshold_value <= 255:
         raise ValueError("threshold_value must be between 0 and 255")

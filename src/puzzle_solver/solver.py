@@ -25,7 +25,7 @@ class PuzzleSolver:
         self,
         output_dir: str | None = None,
         variant: str = "fast",
-        min_area: int = 200000,
+        min_area: int | str = 200000,
         threshold_value: int | str | None = 140,
     ) -> None:
         self.output_dir = (
