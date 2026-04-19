@@ -73,8 +73,9 @@ def build_camera_controller() -> CameraPort:
 
 def build_puzzle_solver() -> PuzzleSolverPort:
     return PuzzleSolver(
-        min_area=os.getenv("PUZZLE_SOLVER_MIN_AREA", "200000"),
-        threshold_value=os.getenv("PUZZLE_SOLVER_THRESHOLD", "140"),
+        min_area=os.getenv("PUZZLE_SOLVER_MIN_AREA", "60000"),
+        threshold_value=os.getenv("PUZZLE_SOLVER_THRESHOLD"),
+        variant=os.getenv("PUZZLE_SOLVER_ALGO", "fast"),
     )
 
 

@@ -211,7 +211,7 @@ class Match(Solver):
         while steps < max_steps:
             distance = point_distance(current_piece_index, next_piece_index)
 
-            if distance < 15.0:  # Threshold for matching points
+            if distance < 50.0:  # Threshold for matching points
                 matching_points += 1
                 current_piece_index += 1
                 next_piece_index -= 1

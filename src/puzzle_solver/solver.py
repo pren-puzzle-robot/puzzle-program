@@ -25,7 +25,7 @@ class PuzzleSolver:
         self,
         output_dir: str | None = None,
         variant: str = "fast",
-        min_area: int | str = 200000,
+        min_area: int | str = 60000,
         threshold_value: int | str | None = 140,
     ) -> None:
         self.output_dir = (
@@ -83,6 +83,9 @@ class PuzzleSolver:
             threshold_value=self.threshold_value,
         )
         logger.info("Extracted %d piece masks", len(piece_images))
+
+        if len(piece_images) != 4 and len(piece_images) != 6:
+            raise ValueError(f"Unexpected number of piece images: {len(piece_images)}")
 
         corners = detect_corners(piece_images, str(self.output_dir))
         logger.info("Detected corners for %d pieces", len(corners))

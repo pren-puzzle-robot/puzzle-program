@@ -122,14 +122,35 @@ def save_contours_only(img, contours, outdir):
 
     return summary, paths
 
-def pull_pieces(image, outdir, min_area=2000, threshold_value=None) -> list[str]:
+def pull_pieces(image, outdir, min_area=60000, threshold_value=None) -> list[str]:
     ensure_dir(outdir)
 
     gray = preprocess(image)
-    fg = segment_foreground(gray, threshold_value=threshold_value)
-    contours = find_pieces(fg, min_area=min_area)
 
-    summary, paths = save_contours_only(image, contours, outdir)
+    if threshold_value is None:
+        candidate_thresholds = [80, 100,120, 140, 160, 180, 200, 220]
+
+        best_contours = None
+
+        for tv in candidate_thresholds:
+            fg = segment_foreground(gray, threshold_value=tv)
+            contours = find_pieces(fg, min_area=min_area)
+
+            if len(contours) in (4, 6):
+                best_contours = contours  # keep updating => return highes threshold that yields 4 or 6 contours, to avoid overfitting to noise
+                logger.debug("Tried threshold %s: found %d contours with size %s", tv, len(contours), [cv.contourArea(c) for c in contours])
+
+
+        # fallback: if no valid threshold found, just use last attempt
+        if best_contours is None:
+            fg = segment_foreground(gray, threshold_value=candidate_thresholds[-1])
+            best_contours = find_pieces(fg, min_area=min_area)
+
+    else:
+        fg = segment_foreground(gray, threshold_value=threshold_value)
+        best_contours = find_pieces(fg, min_area=min_area)
+
+    summary, paths = save_contours_only(image, best_contours, outdir)
     return paths
 
 
@@ -137,7 +158,7 @@ def main():
     ap = argparse.ArgumentParser(description="Detect puzzle piece edges and interlocks")
     ap.add_argument("--image", required=True, help="path to input image")
     ap.add_argument("--outdir", default="output", help="folder to save results")
-    ap.add_argument("--min_area", type=int, default=200000, help="min contour area to keep")
+    ap.add_argument("--min_area", type=int, default=60000, help="min contour area to keep")
     ap.add_argument(
         "--threshold",
         default=None,
