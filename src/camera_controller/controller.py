@@ -164,11 +164,11 @@ class CameraController:
                     cv2.LINE_AA,
                 )
 
-        output_path = (
-            Path(destination)
-            if destination is not None
-            else source_path.with_stem(f"{source_path.stem}_aruco_marked")
-        )
+        if destination is not None:
+            output_path = Path(destination) / f"{source_path.stem}_aruco_marked{source_path.suffix}"
+        else:
+            output_path = source_path.with_name(f"{source_path.stem}_aruco_marked{source_path.suffix}")
+
         if not cv2.imwrite(str(output_path), annotated):
             raise RuntimeError(f"Unable to write annotated image: {output_path}")
 
@@ -198,16 +198,26 @@ class CameraController:
         if ids is None:
             raise RuntimeError("No ArUco markers detected in image")
 
-        marker_centers: dict[int, np.ndarray] = {}
+        detected_marker_corners: dict[int, np.ndarray] = {}
         for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
-            marker_centers[int(marker_id)] = marker_corner[0].mean(axis=0)
+            detected_marker_corners[int(marker_id)] = marker_corner[0]
 
-        missing_marker_ids = [marker_id for marker_id in marker_ids if marker_id not in marker_centers]
+        missing_marker_ids = [
+            marker_id for marker_id in marker_ids if marker_id not in detected_marker_corners
+        ]
         if missing_marker_ids:
             raise RuntimeError(f"Missing required ArUco markers: {missing_marker_ids}")
 
+        # OpenCV returns ArUco corners in marker order:
+        # top-left, top-right, bottom-right, bottom-left.
+        # The markers are passed in rectangle order, so pick the outer corner of
+        # each marker instead of the marker center.
+        outer_corner_indices = (1, 0, 3, 1)
         source_points = np.array(
-            [marker_centers[marker_id] for marker_id in marker_ids],
+            [
+                detected_marker_corners[marker_id][corner_index]
+                for marker_id, corner_index in zip(marker_ids, outer_corner_indices, strict=True)
+            ],
             dtype=np.float32,
         )
 
