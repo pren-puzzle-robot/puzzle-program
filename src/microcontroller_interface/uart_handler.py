@@ -200,6 +200,6 @@ class UartHandler:
         self.send_payload_with_handshake(
             connection,
             # ToDo: use correct payload encoding once Microcontroller Supports it
-            "M".encode("ascii"),
-            # self.encode_move_payload(command),
+            # "M".encode("ascii"),
+            self.encode_move_payload(command),
         )

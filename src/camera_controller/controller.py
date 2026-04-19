@@ -101,21 +101,13 @@ class CameraController:
         logger.info("Undistorted image written to %s", destination)
         return destination
 
-    def flatten_image_with_aruco(
+    def _detect_aruco_markers(
         self,
-        source: str | Path,
-        marker_ids: tuple[int, int, int, int] = (0, 1, 2, 3),
-        dictionary_name: str = "DICT_4X4_50",
-        output_size: tuple[int, int] | None = None,
-    ) -> str:
-        logger.info("Flattening image %s using ArUco markers %s", source, marker_ids)
+        image: np.ndarray,
+        dictionary_name: str,
+    ) -> tuple[object, list[np.ndarray], np.ndarray | None]:
         if not hasattr(cv2, "aruco"):
             raise RuntimeError("OpenCV ArUco module is not available")
-
-        source_path = Path(source)
-        image = cv2.imread(str(source_path))
-        if image is None:
-            raise RuntimeError(f"Unable to read image for flattening: {source_path}")
 
         aruco = cv2.aruco
         dictionary_id = getattr(aruco, dictionary_name, None)
@@ -124,6 +116,9 @@ class CameraController:
 
         dictionary = aruco.getPredefinedDictionary(dictionary_id)
         detector_parameters = aruco.DetectorParameters()
+        detector_parameters.adaptiveThreshWinSizeMin = 3
+        detector_parameters.adaptiveThreshWinSizeMax = 41
+        detector_parameters.adaptiveThreshWinSizeStep = 4
         if hasattr(aruco, "ArucoDetector"):
             detector = aruco.ArucoDetector(dictionary, detector_parameters)
             corners, ids, _ = detector.detectMarkers(image)
@@ -133,6 +128,72 @@ class CameraController:
                 dictionary,
                 parameters=detector_parameters,
             )
+
+        return aruco, corners, ids
+
+    def mark_aruco_markers(
+        self,
+        source: str | Path,
+        destination: str | Path | None = None,
+        dictionary_name: str = "DICT_4X4_50",
+    ) -> str:
+        logger.info("Marking ArUco markers in image %s", source)
+        source_path = Path(source)
+        image = cv2.imread(str(source_path))
+        if image is None:
+            raise RuntimeError(f"Unable to read image for marker annotation: {source_path}")
+
+        aruco, corners, ids = self._detect_aruco_markers(image, dictionary_name)
+        annotated = image.copy()
+
+        if ids is not None:
+            aruco.drawDetectedMarkers(annotated, corners, ids)
+
+            for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
+                center = marker_corner[0].mean(axis=0)
+                center_point = tuple(np.rint(center).astype(int))
+                cv2.circle(annotated, center_point, 8, (0, 0, 255), -1)
+                cv2.putText(
+                    annotated,
+                    f"id={int(marker_id)}",
+                    (center_point[0] + 10, center_point[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 0, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        output_path = (
+            Path(destination)
+            if destination is not None
+            else source_path.with_stem(f"{source_path.stem}_aruco_marked")
+        )
+        if not cv2.imwrite(str(output_path), annotated):
+            raise RuntimeError(f"Unable to write annotated image: {output_path}")
+
+        resolved_output_path = str(output_path.resolve())
+        logger.info(
+            "Annotated image written to %s with %d markers",
+            resolved_output_path,
+            0 if ids is None else len(ids),
+        )
+        return resolved_output_path
+
+    def flatten_image_with_aruco(
+        self,
+        source: str | Path,
+        marker_ids: tuple[int, int, int, int] = (0, 1, 2, 3),
+        dictionary_name: str = "DICT_4X4_50",
+        output_size: tuple[int, int] | None = None,
+    ) -> str:
+        logger.info("Flattening image %s using ArUco markers %s", source, marker_ids)
+        source_path = Path(source)
+        image = cv2.imread(str(source_path))
+        if image is None:
+            raise RuntimeError(f"Unable to read image for flattening: {source_path}")
+
+        _, corners, ids = self._detect_aruco_markers(image, dictionary_name)
 
         if ids is None:
             raise RuntimeError("No ArUco markers detected in image")
