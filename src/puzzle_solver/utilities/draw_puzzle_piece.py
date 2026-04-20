@@ -97,11 +97,15 @@ def print_whole_puzzle_image(pieces: dict[int, PuzzlePiece]) -> Image.Image:
         all_points.extend(piece.polygon.vertices)
 
     # Determine bounding box
+    min_x = min(p.x for p in all_points)
+    min_y = min(p.y for p in all_points)
     max_x = max(p.x for p in all_points)
     max_y = max(p.y for p in all_points)
 
     width = int(math.ceil(max_x))
     height = int(math.ceil(max_y))
+
+    print(min_x, min_y, max_x, max_y, width, height)
 
     # Transparent background
     img = Image.new("RGBA", (width, height), (255, 0, 0, 255))

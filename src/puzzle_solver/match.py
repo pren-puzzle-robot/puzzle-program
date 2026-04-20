@@ -8,7 +8,7 @@ import time
 
 from .component import PuzzlePiece, Point, OuterEdge
 from .utilities import Solver
-from .utilities.draw_puzzle_piece import print_whole_puzzle_image
+from .utilities.draw_puzzle_piece import print_whole_puzzle_image, render_and_show_puzzle_piece
 from .utilities.puzzle_piece_loader import PuzzlePieceLoader
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ class Match(Solver):
             # Get the first outer edge of the next piece
             next_edge = next_piece.outer_edge.edges[0]
 
-            MARGIN = 10.0 # margin between pieces
+            MARGIN = 15.0 # margin between pieces
 
             # direction vector along the current edge
             dx = current_edge.p2.x - current_edge.p1.x

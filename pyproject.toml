@@ -9,6 +9,7 @@ description = "Puzzle orchestrator project with camera and solver modules."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Tim" }]
+dependencies = ["shapely>=2,<3"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
