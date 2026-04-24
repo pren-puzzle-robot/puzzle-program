@@ -101,6 +101,7 @@ sudo ip route del default
 sudo apt update
 sudo apt upgrade
 sudo apt install python3-opencv -y
+sudo apt install python3-shapely
 ```
 
 To allow access to /dev/serial0:
