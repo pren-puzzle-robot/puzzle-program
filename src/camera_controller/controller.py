@@ -212,7 +212,7 @@ class CameraController:
         # top-left, top-right, bottom-right, bottom-left.
         # The markers are passed in rectangle order, so pick the outer corner of
         # each marker instead of the marker center.
-        outer_corner_indices = (1, 0, 3, 1)
+        outer_corner_indices = (3, 0, 2, 2)
         source_points = np.array(
             [
                 detected_marker_corners[marker_id][corner_index]
