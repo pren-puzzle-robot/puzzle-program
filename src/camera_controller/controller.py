@@ -186,6 +186,12 @@ class CameraController:
         marker_ids: tuple[int, int, int, int] = (0, 1, 2, 3),
         dictionary_name: str = "DICT_4X4_50",
         output_size: tuple[int, int] | None = None,
+        corner_offset_percentages: tuple[
+            tuple[float, float],
+            tuple[float, float],
+            tuple[float, float],
+            tuple[float, float],
+        ] = ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
     ) -> str:
         logger.info("Flattening image %s using ArUco markers %s", source, marker_ids)
         source_path = Path(source)
@@ -220,35 +226,81 @@ class CameraController:
             ],
             dtype=np.float32,
         )
+        labels = ("top-left", "top-right", "bottom-right", "bottom-left")
+
+        offset_percentages = np.array(corner_offset_percentages, dtype=np.float32)
+        if offset_percentages.shape != (4, 2):
+            raise ValueError(
+                "corner_offset_percentages must contain four (dx, dy) percentage pairs"
+            )
+        offset_points = np.zeros((4, 2), dtype=np.float32)
+        for index in range(4):
+            current_point = source_points[index]
+            next_point = source_points[(index + 1) % 4]
+            previous_point = source_points[(index - 1) % 4]
+            next_vector = next_point - current_point
+            previous_vector = previous_point - current_point
+            offset_points[index] = (
+                next_vector * (offset_percentages[index, 0] / 100.0)
+                + previous_vector * (offset_percentages[index, 1] / 100.0)
+            )
+
+        adjusted_source_points = source_points + offset_points
 
         debug_image = image.copy()
-        polygon_points = np.rint(source_points).astype(np.int32).reshape((-1, 1, 2))
-        cv2.polylines(debug_image, [polygon_points], True, (0, 255, 0), 3, cv2.LINE_AA)
-        for label, point in zip(
-            ("top-left", "top-right", "bottom-right", "bottom-left"),
+        detected_polygon_points = np.rint(source_points).astype(np.int32).reshape((-1, 1, 2))
+        adjusted_polygon_points = (
+            np.rint(adjusted_source_points).astype(np.int32).reshape((-1, 1, 2))
+        )
+        cv2.polylines(debug_image, [detected_polygon_points], True, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.polylines(debug_image, [adjusted_polygon_points], True, (0, 255, 0), 3, cv2.LINE_AA)
+        for label, detected_point, adjusted_point, offset, percentage in zip(
+            labels,
             np.rint(source_points).astype(np.int32),
+            np.rint(adjusted_source_points).astype(np.int32),
+            np.rint(offset_points).astype(np.int32),
+            offset_percentages,
             strict=True,
         ):
-            point_tuple = tuple(point)
-            cv2.circle(debug_image, point_tuple, 4, (0, 0, 255), -1)
+            detected_point_tuple = tuple(detected_point)
+            adjusted_point_tuple = tuple(adjusted_point)
+            cv2.circle(debug_image, detected_point_tuple, 4, (255, 0, 0), -1)
+            cv2.circle(debug_image, adjusted_point_tuple, 4, (0, 0, 255), -1)
+            cv2.line(
+                debug_image,
+                detected_point_tuple,
+                adjusted_point_tuple,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
             cv2.putText(
                 debug_image,
-                label,
-                (point_tuple[0] + 20, point_tuple[1] - 20),
+                (
+                    f"{label} dx={int(offset[0])} dy={int(offset[1])} "
+                    f"(next={percentage[0]:.2f}%, prev={percentage[1]:.2f}%)"
+                ),
+                (adjusted_point_tuple[0] + 20, adjusted_point_tuple[1] - 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1.2,
+                0.9,
                 (0, 0, 255),
-                3,
+                2,
                 cv2.LINE_AA,
             )
 
         if output_size is None:
-            width_top = np.linalg.norm(source_points[1] - source_points[0])
-            width_bottom = np.linalg.norm(source_points[2] - source_points[3])
-            height_right = np.linalg.norm(source_points[2] - source_points[1])
-            height_left = np.linalg.norm(source_points[3] - source_points[0])
-            width = max(1, int(round(max(width_top, width_bottom))))
-            height = max(1, int(round(max(height_left, height_right))))
+            adjusted_width_top = np.linalg.norm(adjusted_source_points[1] - adjusted_source_points[0])
+            adjusted_width_bottom = np.linalg.norm(
+                adjusted_source_points[2] - adjusted_source_points[3]
+            )
+            adjusted_height_right = np.linalg.norm(
+                adjusted_source_points[2] - adjusted_source_points[1]
+            )
+            adjusted_height_left = np.linalg.norm(
+                adjusted_source_points[3] - adjusted_source_points[0]
+            )
+            width = max(1, int(round(max(adjusted_width_top, adjusted_width_bottom))))
+            height = max(1, int(round(max(adjusted_height_left, adjusted_height_right))))
         else:
             width, height = output_size
             if width <= 0 or height <= 0:
@@ -265,7 +317,7 @@ class CameraController:
         )
 
         perspective_transform = cv2.getPerspectiveTransform(
-            source_points,
+            adjusted_source_points,
             destination_points,
         )
         flattened = cv2.warpPerspective(image, perspective_transform, (width, height))
@@ -342,6 +394,14 @@ class CameraController:
         # resolved_destination = str(undistorted_destination.resolve())
         # logger.info("Returning undistorted image at %s", resolved_destination)
 
-        flattened_destination = self.flatten_image_with_aruco(destination)
+        flattened_destination = self.flatten_image_with_aruco(
+            destination,
+            corner_offset_percentages=(
+                (0.0, 0.0),
+                (1.0, 0.2),
+                (0.1, 1.6),
+                (1.7, 0.2),
+            ),
+        )
         logger.info("Returning flattened image at %s", flattened_destination)
         return flattened_destination
