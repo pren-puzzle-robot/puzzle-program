@@ -221,6 +221,27 @@ class CameraController:
             dtype=np.float32,
         )
 
+        debug_image = image.copy()
+        polygon_points = np.rint(source_points).astype(np.int32).reshape((-1, 1, 2))
+        cv2.polylines(debug_image, [polygon_points], True, (0, 255, 0), 3, cv2.LINE_AA)
+        for label, point in zip(
+            ("top-left", "top-right", "bottom-right", "bottom-left"),
+            np.rint(source_points).astype(np.int32),
+            strict=True,
+        ):
+            point_tuple = tuple(point)
+            cv2.circle(debug_image, point_tuple, 4, (0, 0, 255), -1)
+            cv2.putText(
+                debug_image,
+                label,
+                (point_tuple[0] + 20, point_tuple[1] - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (0, 0, 255),
+                3,
+                cv2.LINE_AA,
+            )
+
         if output_size is None:
             width_top = np.linalg.norm(source_points[1] - source_points[0])
             width_bottom = np.linalg.norm(source_points[2] - source_points[3])
@@ -253,8 +274,13 @@ class CameraController:
         if not cv2.imwrite(str(destination), flattened):
             raise RuntimeError(f"Unable to write flattened image: {destination}")
 
+        debug_destination = source_path.with_stem(f"{source_path.stem}_flattened_debug")
+        if not cv2.imwrite(str(debug_destination), debug_image):
+            raise RuntimeError(f"Unable to write flattening debug image: {debug_destination}")
+
         resolved_destination = str(destination.resolve())
         logger.info("Flattened image written to %s", resolved_destination)
+        logger.info("Flattening debug image written to %s", debug_destination.resolve())
         return resolved_destination
 
     def capture_frame(self) -> str:
