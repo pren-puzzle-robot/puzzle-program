@@ -76,6 +76,9 @@ def build_puzzle_solver() -> PuzzleSolverPort:
         min_area=os.getenv("PUZZLE_SOLVER_MIN_AREA", "60000"),
         threshold_value=os.getenv("PUZZLE_SOLVER_THRESHOLD"),
         variant=os.getenv("PUZZLE_SOLVER_ALGO", "fast"),
+        clearance=float(os.getenv("PUZZLE_SOLVER_CLEARANCE", "0")),
+        max_overlap_ratio=float(os.getenv("PUZZLE_SOLVER_MAX_OVERLAP_RATIO", "0.08")),
+        max_empty_ratio=float(os.getenv("PUZZLE_SOLVER_MAX_EMPTY_RATIO", "0.10")),
     )
 
 

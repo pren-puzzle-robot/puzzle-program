@@ -51,8 +51,11 @@ The orchestrator is configured through environment variables.
 | `PUZZLE_CAMERA_TRANSPORT` | `gopro` | Camera backend. Supported values: `gopro`, `mock`. |
 | `PUZZLE_MOCK_CAMERA_IMAGE` | `./data/with_aruco2_flattened.JPG` | Image path used when `PUZZLE_CAMERA_TRANSPORT=mock`. This path is relative to the current working directory unless you provide an absolute path. |
 | `PUZZLE_SOLVER_ALGO` | `fast` | Algorithm to use for solving the puzzle |
-| `PUZZLE_SOLVER_MIN_AREA` | `200000` | Minimum contour area passed to `PuzzleSolver` when no explicit constructor argument is provided. |
-| `PUZZLE_SOLVER_THRESHOLD` | `140` | `0` - `255`, `otsu`. Fixed grayscale threshold passed to `PuzzleSolver` when no explicit constructor argument is provided. Set to `none` or `otsu` to use Otsu thresholding instead. |
+| `PUZZLE_SOLVER_MIN_AREA` | `60000` | Minimum contour area passed to `PuzzleSolver` when no explicit constructor argument is provided. |
+| `PUZZLE_SOLVER_THRESHOLD` | unset | `0` - `255`, `otsu`. Fixed grayscale threshold passed to `PuzzleSolver` when set. Leave unset or set to `none`/`otsu` to use automatic threshold selection. |
+| `PUZZLE_SOLVER_CLEARANCE` | `0` | Minimum spacing between packed polygons in pixels. |
+| `PUZZLE_SOLVER_MAX_OVERLAP_RATIO` | `0.08` | Maximum allowed pairwise polygon overlap as a fraction of the smaller piece area. |
+| `PUZZLE_SOLVER_MAX_EMPTY_RATIO` | `0.10` | Preferred maximum empty area inside the final solution bounding box. |
 
 ### Root folder setup
 
