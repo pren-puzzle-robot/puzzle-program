@@ -13,70 +13,35 @@ Python project scaffold for puzzle orchestration.
 
 ## Run
 
-```bash
-cd src
-python -m puzzle_orchestrator
-```
-
-If you want to set one variable for the current PowerShell session, use:
-
-Example:
-
 ```powershell
-$env:PUZZLE_CAMERA_TRANSPORT = "mock"
-```
-
-If you want to set one variable for the current Bash session, use:
-
-Example:
-
-```bash
-export PUZZLE_CAMERA_TRANSPORT="mock"
+python -m pip install -e .
+$env:PYTHONPATH = "src"
+python -m puzzle_orchestrator
 ```
 
 ## Configuration
 
-The orchestrator is configured through environment variables.
+The orchestrator is configured through `config.ini` in the repository root,
+one level above the `src` folder.
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PUZZLE_LOG_LEVEL` | `DEBUG` | Python logging level used by `puzzle_orchestrator` (for example `DEBUG`, `INFO`, `WARNING`). |
-| `PUZZLE_MICROCONTROLLER_TRANSPORT` | `uart` | Microcontroller backend. Supported values: `uart`, `stub`. `stub` skips real UART communication. |
-| `PUZZLE_UART_PORT` | `/dev/serial0` | UART device path (for example `COM3` on Windows). |
-| `PUZZLE_UART_BAUDRATE` | `57600` | UART baud rate. Must match microcontroller firmware configuration. |
-| `PUZZLE_UART_TIMEOUT_SECONDS` | `0.2` | Serial read timeout used for low-level byte reads. |
-| `PUZZLE_UART_ACK_TIMEOUT_SECONDS` | `1.0` | Maximum time to wait for `ACK` (`A`) after sending a command. |
-| `PUZZLE_UART_DONE_TIMEOUT_SECONDS` | `30.0` | Maximum time to wait for `done` (`D`) before sending the next command. |
-| `PUZZLE_UART_WAIT_FOR_START` | `false` | If set to `true`, `1`, or `yes`, the UART interface waits for the microcontroller start signal before execution begins. |
-| `PUZZLE_CAMERA_TRANSPORT` | `gopro` | Camera backend. Supported values: `gopro`, `mock`. |
-| `PUZZLE_MOCK_CAMERA_IMAGE` | `./data/with_aruco2_flattened.JPG` | Image path used when `PUZZLE_CAMERA_TRANSPORT=mock`. This path is relative to the current working directory unless you provide an absolute path. |
-| `PUZZLE_SOLVER_ALGO` | `fast` | Algorithm to use for solving the puzzle |
-| `PUZZLE_SOLVER_MIN_AREA` | `200000` | Minimum contour area passed to `PuzzleSolver` when no explicit constructor argument is provided. |
-| `PUZZLE_SOLVER_THRESHOLD` | `140` | `0` - `255`, `otsu`. Fixed grayscale threshold passed to `PuzzleSolver` when no explicit constructor argument is provided. Set to `none` or `otsu` to use Otsu thresholding instead. |
+| Section | Key | Default | Description |
+| --- | --- | --- | --- |
+| `logging` | `level` | `DEBUG` | Python logging level used by `puzzle_orchestrator`, for example `DEBUG`, `INFO`, or `WARNING`. |
+| `microcontroller` | `transport` | `stub` | Microcontroller backend. Supported values: `uart`, `stub`. `stub` skips real UART communication. |
+| `uart` | `port` | `/dev/serial0` | UART device path, for example `COM3` on Windows. |
+| `uart` | `baudrate` | `57600` | UART baud rate. Must match microcontroller firmware configuration. |
+| `uart` | `timeout_seconds` | `0.2` | Serial read timeout used for low-level byte reads. |
+| `uart` | `ack_timeout_seconds` | `1.0` | Maximum time to wait for `ACK` (`A`) after sending a command. |
+| `uart` | `done_timeout_seconds` | `30.0` | Maximum time to wait for `done` (`D`) before sending the next command. |
+| `uart` | `wait_for_start` | `false` | If set to `true`, the UART interface waits for the microcontroller start signal before execution begins. |
+| `camera` | `transport` | `mock` | Camera backend. Supported values: `gopro`, `mock`. |
+| `camera` | `mock_image` | `data/with_aruco2_flattened.JPG` | Image path used when `camera.transport = mock`. Relative paths are resolved from the folder containing `config.ini`. |
+| `solver` | `algorithm` | `fast` | Algorithm to use for solving the puzzle. |
+| `solver` | `min_area` | `60000` | Minimum contour area passed to `PuzzleSolver`. |
+| `solver` | `threshold` | `none` | `0` - `255`, `none`, or `otsu`. Set to `none` or `otsu` to use Otsu thresholding. |
 
-### Root folder setup
-
-To run from the repository root, this is the one extra variable you have to set:
-
-```powershell
-$env:PYTHONPATH = "src"
-```
-
-Recommended example for local testing from the root folder:
-
-```powershell
-$env:PYTHONPATH = "src"
-$env:PUZZLE_CAMERA_TRANSPORT = "mock"
-$env:PUZZLE_MICROCONTROLLER_TRANSPORT = "stub"
-python -m puzzle_orchestrator
-```
-
-Example for Bash
-```bash
-export PYTHONPATH="src"
-export PUZZLE_CAMERA_TRANSPORT="mock"
-python -m puzzle_orchestrator
-```
+For local testing without hardware, set `camera.transport = mock` and
+`microcontroller.transport = stub` in `config.ini`.
 
 ## Microcontroller Protocol Notes
 
