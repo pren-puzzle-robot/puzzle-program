@@ -36,12 +36,21 @@ one level above the `src` folder.
 | `uart` | `wait_for_start` | `false` | If set to `true`, the UART interface waits for the microcontroller start signal before execution begins. |
 | `camera` | `transport` | `mock` | Camera backend. Supported values: `gopro`, `mock`. |
 | `camera` | `mock_image` | `data/with_aruco2_flattened.JPG` | Image path used when `camera.transport = mock`. Relative paths are resolved from the folder containing `config.ini`. |
+| `coordinate_mapper` | `scale_x`, `scale_y` | `1.0`, `1.0` | Shared machine-units-per-solver-unit scale used for both `start` and `end` coordinates. `scale_x = machine_dx / solver_dx` |
+| `coordinate_mapper.start` | `x_min`, `y_min` | `0.0`, `0.0` | Machine-space offset where solver `start` coordinate `(0, 0)` is placed.  |
+| `coordinate_mapper.end` | `x_min`, `y_min` | `0.0`, `0.0` | Machine-space offset where solver `end` coordinate `(0, 0)` is placed. |
 | `solver` | `algorithm` | `fast` | Algorithm to use for solving the puzzle. |
 | `solver` | `min_area` | `60000` | Minimum contour area passed to `PuzzleSolver`. |
 | `solver` | `threshold` | `none` | `0` - `255`, `none`, or `otsu`. Set to `none` or `otsu` to use Otsu thresholding. |
 
 For local testing without hardware, set `camera.transport = mock` and
 `microcontroller.transport = stub` in `config.ini`.
+
+The coordinate mapper uses:
+`machine_x = x_min + solver_x * scale_x`
+and
+`machine_y = y_min + solver_y * scale_y`
+with separate `x_min` and `y_min` offsets for `start` and `end`.
 
 ## Microcontroller Protocol Notes
 

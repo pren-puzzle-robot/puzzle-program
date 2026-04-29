@@ -36,6 +36,20 @@ class CameraConfig:
 
 
 @dataclass(frozen=True)
+class CoordinateOffsetConfig:
+    x_min: float
+    y_min: float
+
+
+@dataclass(frozen=True)
+class CoordinateMapperConfig:
+    scale_x: float
+    scale_y: float
+    start: CoordinateOffsetConfig
+    end: CoordinateOffsetConfig
+
+
+@dataclass(frozen=True)
 class SolverConfig:
     algorithm: str
     min_area: int
@@ -48,6 +62,7 @@ class AppConfig:
     microcontroller: MicrocontrollerConfig
     uart: UartConfig
     camera: CameraConfig
+    coordinate_mapper: CoordinateMapperConfig
     solver: SolverConfig
 
 
@@ -73,6 +88,18 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "camera": {
                 "transport": "gopro",
                 "mock_image": "data/with_aruco2_flattened.JPG",
+            },
+            "coordinate_mapper": {
+                "scale_x": "1.0",
+                "scale_y": "1.0",
+            },
+            "coordinate_mapper.start": {
+                "x_min": "0.0",
+                "y_min": "0.0",
+            },
+            "coordinate_mapper.end": {
+                "x_min": "0.0",
+                "y_min": "0.0",
             },
             "solver": {
                 "algorithm": "fast",
@@ -105,6 +132,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
                 config_path.parent,
             ),
         ),
+        coordinate_mapper=CoordinateMapperConfig(
+            scale_x=parser.getfloat("coordinate_mapper", "scale_x"),
+            scale_y=parser.getfloat("coordinate_mapper", "scale_y"),
+            start=_read_coordinate_offset(parser, "coordinate_mapper.start"),
+            end=_read_coordinate_offset(parser, "coordinate_mapper.end"),
+        ),
         solver=SolverConfig(
             algorithm=parser.get("solver", "algorithm").strip().lower(),
             min_area=parser.getint("solver", "min_area"),
@@ -125,3 +158,15 @@ def _optional_value(value: str) -> str | None:
     if not value or value.lower() in {"none", "null"}:
         return None
     return value
+
+
+def _read_coordinate_offset(
+    parser: ConfigParser,
+    section: str,
+) -> CoordinateOffsetConfig:
+    x_min = parser.getfloat(section, "x_min")
+    y_min = parser.getfloat(section, "y_min")
+    return CoordinateOffsetConfig(
+        x_min=x_min,
+        y_min=y_min,
+    )

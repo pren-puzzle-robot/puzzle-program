@@ -1,7 +1,7 @@
 import logging
 
 from camera_controller import CameraController, MockCameraController
-from coordinate_mapper import CoordinateMapper
+from coordinate_mapper import CoordinateMapper, CoordinateOffset
 from microcontroller_interface import (
     MicrocontrollerInterface,
     UartMicrocontrollerInterface,
@@ -63,8 +63,19 @@ def build_puzzle_solver(config: AppConfig) -> PuzzleSolverPort:
     )
 
 
-def build_coordinate_mapper() -> CoordinateMapperPort:
-    return CoordinateMapper()
+def build_coordinate_mapper(config: AppConfig) -> CoordinateMapperPort:
+    return CoordinateMapper(
+        scale_x=config.coordinate_mapper.scale_x,
+        scale_y=config.coordinate_mapper.scale_y,
+        start_offset=CoordinateOffset(
+            x_min=config.coordinate_mapper.start.x_min,
+            y_min=config.coordinate_mapper.start.y_min,
+        ),
+        end_offset=CoordinateOffset(
+            x_min=config.coordinate_mapper.end.x_min,
+            y_min=config.coordinate_mapper.end.y_min,
+        ),
+    )
 
 
 def main() -> None:
@@ -74,7 +85,7 @@ def main() -> None:
     orchestrator = PuzzleOrchestrator(
         camera_controller=build_camera_controller(config),
         puzzle_solver=build_puzzle_solver(config),
-        coordinate_mapper=build_coordinate_mapper(),
+        coordinate_mapper=build_coordinate_mapper(config),
         microcontroller_interface=build_microcontroller_interface(config),
     )
     try:
