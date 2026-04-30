@@ -39,7 +39,7 @@ one level above the `src` folder.
 | `coordinate_mapper` | `scale_x`, `scale_y` | `1.0`, `1.0` | Shared machine-units-per-solver-unit scale used for both `start` and `end` coordinates. `scale_x = machine_dx / solver_dx` |
 | `coordinate_mapper.start` | `x_min`, `y_min` | `0.0`, `0.0` | Machine-space offset where solver `start` coordinate `(0, 0)` is placed.  |
 | `coordinate_mapper.end` | `x_min`, `y_min` | `0.0`, `0.0` | Machine-space offset where solver `end` coordinate `(0, 0)` is placed. |
-| `solver` | `algorithm` | `fast` | Algorithm to use for solving the puzzle. |
+| `solver` | `algorithm` | `fast` | Algorithm to use for solving the puzzle. Supported values: `fast`, `greedy`, `brute_force`. `brute_force` searches poses from detected outer edges and scores compact A-series layouts with little or no polygon overlap. |
 | `solver` | `min_area` | `60000` | Minimum contour area passed to `PuzzleSolver`. |
 | `solver` | `threshold` | `none` | `0` - `255`, `none`, or `otsu`. Set to `none` or `otsu` to use Otsu thresholding. |
 

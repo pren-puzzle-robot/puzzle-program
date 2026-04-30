@@ -10,6 +10,7 @@ import cv2 as cv
 
 from puzzle_models import SolverPlacement
 
+from .brute_force import BruteForce
 from .component import PuzzlePiece, Point
 from .corners import detect_corners
 from .greedy import Greedy
@@ -58,6 +59,9 @@ class PuzzleSolver:
         return puzzle_pieces
 
     def _create_solver(self, puzzle_pieces: dict[int, PuzzlePiece]) -> Solver:
+        if self.variant in {"brute_force", "bruteforce", "brute"}:
+            return BruteForce()
+
         if self.variant == "greedy":
             return Greedy(puzzle_pieces)
 
