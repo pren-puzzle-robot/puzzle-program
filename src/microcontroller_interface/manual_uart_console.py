@@ -75,6 +75,7 @@ class ManualUartConsole:
             "l": SimpleSendCommand.LOWER,
             "H": SimpleSendCommand.HOLD_ON,
             "h": SimpleSendCommand.HOLD_OFF,
+            "R": SimpleSendCommand.RESET,
         }
         return mapping.get(raw)
 
@@ -132,7 +133,7 @@ def main() -> None:
                     print(f"! {exc}")
                 continue
 
-            print("Unknown command. Use: M x y r | L | l | H | h | quit")
+            print("Unknown command. Use: M x y r | L | l | H | h | R | quit")
     finally:
         console.close()
         time.sleep(0.1)

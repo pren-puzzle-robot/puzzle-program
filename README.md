@@ -19,6 +19,11 @@ $env:PYTHONPATH = "src"
 python -m puzzle_orchestrator
 ```
 
+```bash
+export PYTHONPATH="src"
+python -m puzzle_orchestrator
+```
+
 ## Configuration
 
 The orchestrator is configured through `config.ini` in the repository root,

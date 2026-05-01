@@ -17,6 +17,7 @@ class SimpleSendCommand(Enum):
     LOWER = "l"
     HOLD_ON = "H"
     HOLD_OFF = "h"
+    RESET = "R"
 
 
 class ReceiveCommandCode(Enum):
@@ -56,7 +57,7 @@ class UartHandler:
         port: str,
         baudrate: int = 115200,
         timeout_seconds: float = 1.0,
-        byteorder: str = "<",
+        byteorder: str = ">",
         ack_timeout_seconds: float = 2.0,
         done_timeout_seconds: float = 30.0,
     ) -> None:
