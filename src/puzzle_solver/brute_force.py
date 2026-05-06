@@ -1,55 +1,54 @@
-"""Brute-force compact layout solver based on possible outer edges."""
+"""Brute-force layout solver based on rectangular outer-edge combinations."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 import math
 from typing import Iterable
 
-from shapely import affinity
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry.base import BaseGeometry
 
-from puzzle_solver.utilities.draw_puzzle_piece import render_and_show_puzzle_piece
-
-from .component import Point, PuzzlePiece
+from .component import OuterEdge, Point, PuzzlePiece
 from .utilities import Solver
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class _Pose:
+class _BoundaryCandidate:
     piece_id: int
     outer_edge_index: int
-    rotation: float
-    polygon: BaseGeometry
-    width: float
-    height: float
-    area: float
-    outer_start: Point
-    outer_end: Point
-    outer_start_angle: float
-    outer_end_angle: float
-    outer_edge_length: float
+    outer_edge_reversed: bool
+    points: tuple[Point, ...]
+    length: float
+    first_angle: float
 
 
 @dataclass(frozen=True)
-class _Placement:
+class _BoundaryPlacement:
     piece_id: int
-    pose: _Pose
-    x: float
-    y: float
+    outer_edge_index: int
+    outer_edge_reversed: bool
+    rotation: float
+    target_start: Point
     polygon: BaseGeometry
     bounds: tuple[float, float, float, float]
+    area: float
 
 
 @dataclass(frozen=True)
-class _SearchState:
-    placements: tuple[_Placement, ...]
+class _BoundaryState:
+    placements: tuple[_BoundaryPlacement, ...]
     remaining_piece_ids: frozenset[int]
+    cursor: tuple[float, float]
+    heading: float
     bounds: tuple[float, float, float, float] | None
+    path_bounds: tuple[float, float, float, float]
+    side_lengths: tuple[float, float, float, float]
+    turn_signs: tuple[int, ...]
+    turn_error: float
     piece_area: float
     overlap_area: float
     outer_edge_penalty: float
@@ -57,37 +56,42 @@ class _SearchState:
 
 
 class BruteForce(Solver):
-    """Search for a compact no-overlap layout using detected outer edges.
+    """Search a rectangle-forming sequence of detected outer edges.
 
-    The search space is bounded because the real puzzle only has four or six
-    pieces. Each pose is produced by selecting a possible outer edge and
-    rotating one of its segments to a horizontal or vertical side. Placement is
-    then searched with a beam over piece order, pose, and flush candidate
-    positions.
+    The solver first picks combinations of candidate outer edges and traces them
+    around a four-corner boundary. Pieces are only placed by mapping the chosen
+    outer-edge chain onto that boundary. The final score prefers a closed
+    rectangle whose short:long ratio is roughly 1:sqrt(2), with little overlap.
     """
 
     TARGET_ASPECT_RATIO = 1.0 / math.sqrt(2.0)
-    CLEARANCE = 10.0
-    MAX_POSES_PER_PIECE = 8
-    MAX_POSITION_CANDIDATES = 48
-    MAX_STATES_PER_DEPTH = 100
-    ANCHOR_DISTANCE_PENALTY = 25.0
-    ANGLE_TOLERANCE = math.radians(5.0)
+    MAX_OUTER_EDGE_CANDIDATES_PER_PIECE = 20
+    MAX_STATES_PER_DEPTH = 1800
+    MAX_STATES_PER_PRUNE_BUCKET = 3
+    MAX_TURNS = 4
+    OUTER_EDGES_ARE_COUNTER_CLOCKWISE = True
+
+    TURN_TOLERANCE = math.radians(12.0)
+    RECTANGLE_CLOSURE_TOLERANCE = 0.08
+
     OVERLAP_PENALTY = 1000.0
+    EMPTY_AREA_PENALTY = 4.0
     ASPECT_RATIO_PENALTY = 10000.0
+    CLOSURE_PENALTY = 500.0
+    SIDE_MATCH_PENALTY = 250.0
+    TURN_ERROR_PENALTY = 4000.0
+    BOUNDS_OVERFLOW_PENALTY = 120.0
     OUTER_EDGE_TIEBREAKER = 0.05
+
     AXIS_ANGLES = (0.0, math.pi / 2.0, math.pi, -math.pi / 2.0)
-    ANCHOR_OFFSETS = (
-        (0.0, 0.0),
-        (CLEARANCE, 0.0),
-        (-CLEARANCE, 0.0),
-        (0.0, CLEARANCE),
-        (0.0, -CLEARANCE),
-        (CLEARANCE, CLEARANCE),
-        (CLEARANCE, -CLEARANCE),
-        (-CLEARANCE, CLEARANCE),
-        (-CLEARANCE, -CLEARANCE),
+    AXIS_VECTORS = (
+        (1.0, 0.0),   # east
+        (0.0, 1.0),   # south
+        (-1.0, 0.0),  # west
+        (0.0, -1.0),  # north
     )
+    # Stored as east, west, south, north for easy opposite-side comparison.
+    AXIS_SIDE_INDEX = (0, 2, 1, 3)
 
     @classmethod
     def solve(cls, puzzle: dict[int, PuzzlePiece]) -> list[int]:
@@ -97,296 +101,570 @@ class BruteForce(Solver):
     def _solve(self, puzzle: dict[int, PuzzlePiece]) -> list[int]:
         if not puzzle:
             return []
-        
-        # for piece_id, piece in puzzle.items():
-        #     render_and_show_puzzle_piece(piece)
 
-        poses_by_piece = {
-            piece_id: self._build_piece_poses(piece_id, piece)
+        candidate_limit = self._max_outer_edge_candidates(len(puzzle))
+        candidates_by_piece = {
+            piece_id: self._build_boundary_candidates(piece_id, piece, candidate_limit)
             for piece_id, piece in puzzle.items()
         }
-        total_area = sum(piece.polygon.area() for piece in puzzle.values())
         best_outer_lengths = {
-            piece_id: max(pose.outer_edge_length for pose in poses)
-            for piece_id, poses in poses_by_piece.items()
+            piece_id: max(candidate.length for candidate in candidates)
+            for piece_id, candidates in candidates_by_piece.items()
         }
 
-        states: list[_SearchState] = [
-            _SearchState(
+        states: list[_BoundaryState] = [
+            _BoundaryState(
                 placements=(),
                 remaining_piece_ids=frozenset(puzzle),
+                cursor=(0.0, 0.0),
+                heading=0.0,
                 bounds=None,
+                path_bounds=(0.0, 0.0, 0.0, 0.0),
+                side_lengths=(0.0, 0.0, 0.0, 0.0),
+                turn_signs=(),
+                turn_error=0.0,
                 piece_area=0.0,
                 overlap_area=0.0,
                 outer_edge_penalty=0.0,
                 score=0.0,
             )
         ]
+        max_states_per_depth = self._max_states_per_depth(len(puzzle))
+        max_states_per_prune_bucket = self._max_states_per_prune_bucket(len(puzzle))
 
         for depth in range(len(puzzle)):
-            next_states: list[_SearchState] = []
+            next_states: list[_BoundaryState] = []
             for state in states:
                 for piece_id in sorted(state.remaining_piece_ids):
-                    for pose in poses_by_piece[piece_id]:
+                    outer_edge_penalty_base = state.outer_edge_penalty
+                    for candidate in candidates_by_piece[piece_id]:
                         outer_edge_penalty = (
-                            state.outer_edge_penalty
+                            outer_edge_penalty_base
                             + best_outer_lengths[piece_id]
-                            - pose.outer_edge_length
+                            - candidate.length
                         )
-                        candidates = self._candidate_positions(state, pose)
-                        for x, y, anchor_distance in candidates:
-                            next_states.append(
-                                self._place_pose(
-                                    state,
-                                    pose,
-                                    x,
-                                    y,
-                                    outer_edge_penalty,
-                                    anchor_distance,
-                                )
+                        next_states.extend(
+                            self._extend_state(
+                                puzzle[piece_id],
+                                state,
+                                candidate,
+                                outer_edge_penalty,
                             )
+                        )
 
             if not next_states:
-                raise RuntimeError("Brute-force solver could not generate placements")
+                raise RuntimeError(
+                    "Brute-force solver could not generate rectangular boundary states"
+                )
 
-            states = sorted(next_states, key=lambda item: item.score)[
-                : self.MAX_STATES_PER_DEPTH
-            ]
+            states = self._prune_states(
+                next_states,
+                max_states_per_depth,
+                max_states_per_prune_bucket,
+            )
             logger.debug(
-                "Brute-force depth %d retained %d states; best score %.2f",
+                "Brute-force boundary depth %d retained %d states; best score %.2f",
                 depth + 1,
                 len(states),
                 states[0].score,
             )
 
-        best = min(states, key=lambda item: item.score)
+        completed = [
+            finalized
+            for state in states
+            if (finalized := self._finalize_rectangle_state(state)) is not None
+        ]
+        if not completed:
+            raise RuntimeError(
+                "Brute-force solver could not find a closed rectangular outer-edge loop"
+            )
+
+        best = min(completed, key=lambda item: item.score)
         self._apply_solution(puzzle, best)
 
         order = [placement.piece_id for placement in best.placements]
         width, height = self._bounds_size(best.bounds)
-        overlap_ratio = best.overlap_area / total_area if total_area > 0.0 else 0.0
+        path_width, path_height = self._bounds_size(best.path_bounds)
+        overlap_ratio = (
+            best.overlap_area / best.piece_area if best.piece_area > 0.0 else 0.0
+        )
         logger.info(
-            "Brute-force solver selected order %s, bounds %.1fx%.1f, "
-            "aspect %.3f, overlap ratio %.5f",
+            "Brute-force solver selected order %s, boundary %.1fx%.1f, "
+            "layout %.1fx%.1f, boundary aspect %.3f, overlap ratio %.5f",
             order,
+            path_width,
+            path_height,
             width,
             height,
-            self._compact_aspect_ratio(width, height),
+            self._compact_aspect_ratio(path_width, path_height),
             overlap_ratio,
         )
         return order
 
-    def _build_piece_poses(self, piece_id: int, piece: PuzzlePiece) -> list[_Pose]:
-        rotations_by_edge: dict[tuple[int, float], float] = {}
-        for outer_index, outer_edge in enumerate(piece.possible_outer_edges):
-            for edge in outer_edge.edges:
-                edge_angle = math.atan2(edge.p2.y - edge.p1.y, edge.p2.x - edge.p1.x)
-                for axis_angle in self.AXIS_ANGLES:
-                    rotation = self._normalize_angle(axis_angle - edge_angle)
-                    key = (outer_index, round(rotation, 6))
-                    rotations_by_edge[key] = rotation
-
-        poses = [
-            self._build_pose(
-                piece_id=piece_id,
-                piece=piece,
-                outer_edge_index=outer_index,
-                rotation=rotation,
-            )
-            for (outer_index, _), rotation in rotations_by_edge.items()
-        ]
-        poses.sort(key=lambda item: (-item.outer_edge_length, item.width * item.height))
-        return poses[: self.MAX_POSES_PER_PIECE]
-
-    def _build_pose(
+    def _build_boundary_candidates(
         self,
         piece_id: int,
         piece: PuzzlePiece,
-        outer_edge_index: int,
-        rotation: float,
-    ) -> _Pose:
+        candidate_limit: int,
+    ) -> list[_BoundaryCandidate]:
+        candidates: list[_BoundaryCandidate] = []
+        outer_edges = piece.possible_outer_edges[:candidate_limit]
+        for outer_edge_index, outer_edge in enumerate(outer_edges):
+            outer_edge_reversed = self.OUTER_EDGES_ARE_COUNTER_CLOCKWISE
+            points = self._outer_edge_points(outer_edge, outer_edge_reversed)
+            length = self._path_length(points)
+            if length <= 0.0:
+                continue
+            first_angle = math.atan2(
+                points[1].y - points[0].y,
+                points[1].x - points[0].x,
+            )
+            candidates.append(
+                _BoundaryCandidate(
+                    piece_id=piece_id,
+                    outer_edge_index=outer_edge_index,
+                    outer_edge_reversed=outer_edge_reversed,
+                    points=points,
+                    length=length,
+                    first_angle=first_angle,
+                )
+            )
+
+        if not candidates:
+            raise RuntimeError(f"No usable outer-edge candidates for piece {piece_id}")
+
+        candidates.sort(key=lambda item: (-item.length, item.outer_edge_reversed))
+        return candidates
+
+    def _max_outer_edge_candidates(self, piece_count: int) -> int:
+        if piece_count <= 4:
+            return self.MAX_OUTER_EDGE_CANDIDATES_PER_PIECE
+        return self.MAX_OUTER_EDGE_CANDIDATES_PER_PIECE * 2
+
+    def _max_states_per_depth(self, piece_count: int) -> int:
+        if piece_count <= 4:
+            return self.MAX_STATES_PER_DEPTH
+        return self.MAX_STATES_PER_DEPTH * 3
+
+    def _max_states_per_prune_bucket(self, piece_count: int) -> int:
+        if piece_count <= 4:
+            return 1
+        return self.MAX_STATES_PER_PRUNE_BUCKET
+
+    def _extend_state(
+        self,
+        piece: PuzzlePiece,
+        state: _BoundaryState,
+        candidate: _BoundaryCandidate,
+        outer_edge_penalty: float,
+    ) -> list[_BoundaryState]:
+        entry_headings = (
+            (0.0,)
+            if not state.placements
+            else (
+                state.heading,
+                self._normalize_angle(state.heading + math.pi / 2.0),
+                self._normalize_angle(state.heading - math.pi / 2.0),
+            )
+        )
+
+        next_states: list[_BoundaryState] = []
+        for entry_heading in entry_headings:
+            turn_result = self._apply_turn(
+                state.turn_signs,
+                state.turn_error,
+                state.heading,
+                entry_heading,
+                require_turn=bool(state.placements),
+            )
+            if turn_result is None:
+                continue
+
+            turn_signs, turn_error = turn_result
+            trace = self._trace_candidate_path(
+                candidate,
+                state.cursor,
+                entry_heading,
+                state.path_bounds,
+                state.side_lengths,
+                turn_signs,
+                turn_error,
+            )
+            if trace is None:
+                continue
+
+            (
+                cursor,
+                heading,
+                path_bounds,
+                side_lengths,
+                turn_signs,
+                turn_error,
+            ) = trace
+
+            placement = self._place_candidate(
+                piece,
+                candidate,
+                entry_heading,
+                state.cursor,
+            )
+            overlap_area = state.overlap_area + self._overlap_area(
+                placement.polygon,
+                placement.bounds,
+                state.placements,
+            )
+            bounds = self._merge_bounds(state.bounds, placement.bounds)
+            piece_area = state.piece_area + placement.area
+            score = self._partial_score(
+                bounds=bounds,
+                path_bounds=path_bounds,
+                piece_area=piece_area,
+                overlap_area=overlap_area,
+                outer_edge_penalty=outer_edge_penalty,
+                turn_error=turn_error,
+            )
+
+            next_states.append(
+                _BoundaryState(
+                    placements=state.placements + (placement,),
+                    remaining_piece_ids=state.remaining_piece_ids
+                    - {candidate.piece_id},
+                    cursor=cursor,
+                    heading=heading,
+                    bounds=bounds,
+                    path_bounds=path_bounds,
+                    side_lengths=side_lengths,
+                    turn_signs=turn_signs,
+                    turn_error=turn_error,
+                    piece_area=piece_area,
+                    overlap_area=overlap_area,
+                    outer_edge_penalty=outer_edge_penalty,
+                    score=score,
+                )
+            )
+
+        return next_states
+
+    def _trace_candidate_path(
+        self,
+        candidate: _BoundaryCandidate,
+        cursor: tuple[float, float],
+        entry_heading: float,
+        path_bounds: tuple[float, float, float, float],
+        side_lengths: tuple[float, float, float, float],
+        turn_signs: tuple[int, ...],
+        turn_error: float,
+    ) -> (
+        tuple[
+            tuple[float, float],
+            float,
+            tuple[float, float, float, float],
+            tuple[float, float, float, float],
+            tuple[int, ...],
+            float,
+        ]
+        | None
+    ):
+        rotation = self._normalize_angle(entry_heading - candidate.first_angle)
+        heading = entry_heading
+
+        for index, (start, end) in enumerate(self._segments(candidate.points)):
+            segment_length = start.get_distance_between(end)
+            if segment_length <= 0.0:
+                continue
+
+            raw_angle = math.atan2(end.y - start.y, end.x - start.x)
+            axis_angle, axis_error, axis_index = self._snap_axis(
+                raw_angle + rotation
+            )
+            if axis_error > self.TURN_TOLERANCE:
+                return None
+
+            if index > 0:
+                turn_result = self._apply_turn(
+                    turn_signs,
+                    turn_error,
+                    heading,
+                    axis_angle,
+                    require_turn=True,
+                )
+                if turn_result is None:
+                    return None
+                turn_signs, turn_error = turn_result
+
+            turn_error += axis_error
+            heading = axis_angle
+            dx, dy = self.AXIS_VECTORS[axis_index]
+            cursor = (
+                cursor[0] + dx * segment_length,
+                cursor[1] + dy * segment_length,
+            )
+            path_bounds = self._merge_bounds(
+                path_bounds,
+                (cursor[0], cursor[1], cursor[0], cursor[1]),
+            )
+            side_lengths = self._add_side_length(
+                side_lengths,
+                axis_index,
+                segment_length,
+            )
+
+        return cursor, heading, path_bounds, side_lengths, turn_signs, turn_error
+
+    def _prune_states(
+        self,
+        states: list[_BoundaryState],
+        max_states: int,
+        max_states_per_bucket: int,
+    ) -> list[_BoundaryState]:
+        buckets: dict[
+            tuple[
+                frozenset[int],
+                tuple[float, float],
+                int,
+                int,
+                tuple[int, ...],
+            ],
+            list[_BoundaryState],
+        ] = {}
+        for state in sorted(states, key=lambda item: item.score):
+            heading_bucket = round(self._normalize_angle(state.heading), 6)
+            key = (
+                state.remaining_piece_ids,
+                (round(state.cursor[0], 1), round(state.cursor[1], 1)),
+                int(round(heading_bucket * 1000)),
+                len(state.turn_signs),
+                state.turn_signs,
+            )
+            bucket = buckets.setdefault(key, [])
+            if len(bucket) >= max_states_per_bucket:
+                continue
+            bucket.append(state)
+
+        pruned: list[_BoundaryState] = []
+        for rank in range(max_states_per_bucket):
+            ranked_states = [
+                bucket[rank]
+                for bucket in buckets.values()
+                if len(bucket) > rank
+            ]
+            for state in sorted(ranked_states, key=lambda item: item.score):
+                pruned.append(state)
+                if len(pruned) >= max_states:
+                    return pruned
+
+        return pruned
+
+    def _place_candidate(
+        self,
+        piece: PuzzlePiece,
+        candidate: _BoundaryCandidate,
+        entry_heading: float,
+        target_start: tuple[float, float],
+    ) -> _BoundaryPlacement:
+        rotation = self._normalize_angle(entry_heading - candidate.first_angle)
         centroid = piece.polygon.centroid()
+        rotated_anchor = self._rotate_point(candidate.points[0], centroid, rotation)
+        dx = target_start[0] - rotated_anchor.x
+        dy = target_start[1] - rotated_anchor.y
         rotated_points = [
             self._rotate_point(vertex, centroid, rotation)
             for vertex in piece.polygon.vertices
         ]
-        origin_min_x = min(point.x for point in rotated_points)
-        origin_min_y = min(point.y for point in rotated_points)
-        normalized_points = [
-            (point.x - origin_min_x, point.y - origin_min_y)
-            for point in rotated_points
-        ]
-        outer_edge = piece.possible_outer_edges[outer_edge_index]
-        outer_start_segment_p1 = self._rotate_point(
-            outer_edge.edges[0].p1,
-            centroid,
-            rotation,
+        polygon = self._make_geometry(
+            [(point.x + dx, point.y + dy) for point in rotated_points]
         )
-        outer_start_segment_p2 = self._rotate_point(
-            outer_edge.edges[0].p2,
-            centroid,
-            rotation,
-        )
-        outer_end_segment_p1 = self._rotate_point(
-            outer_edge.edges[-1].p1,
-            centroid,
-            rotation,
-        )
-        outer_end_segment_p2 = self._rotate_point(
-            outer_edge.edges[-1].p2,
-            centroid,
-            rotation,
-        )
-        outer_start = self._rotate_point(outer_edge.edges[0].p1, centroid, rotation)
-        outer_end = self._rotate_point(outer_edge.edges[-1].p2, centroid, rotation)
-        polygon = self._make_geometry(normalized_points)
-        min_x, min_y, max_x, max_y = polygon.bounds
-
-        return _Pose(
-            piece_id=piece_id,
-            outer_edge_index=outer_edge_index,
-            rotation=rotation,
-            polygon=polygon,
-            width=max_x - min_x,
-            height=max_y - min_y,
-            area=float(polygon.area),
-            outer_start=Point(
-                outer_start.x - origin_min_x,
-                outer_start.y - origin_min_y,
-            ),
-            outer_end=Point(
-                outer_end.x - origin_min_x,
-                outer_end.y - origin_min_y,
-            ),
-            outer_start_angle=math.atan2(
-                outer_start_segment_p2.y - outer_start_segment_p1.y,
-                outer_start_segment_p2.x - outer_start_segment_p1.x,
-            ),
-            outer_end_angle=math.atan2(
-                outer_end_segment_p2.y - outer_end_segment_p1.y,
-                outer_end_segment_p2.x - outer_end_segment_p1.x,
-            ),
-            outer_edge_length=piece.possible_outer_edges[outer_edge_index].length,
-        )
-
-    def _candidate_positions(
-        self,
-        state: _SearchState,
-        pose: _Pose,
-    ) -> list[tuple[float, float, float]]:
-        if not state.placements:
-            return [(0.0, 0.0, 0.0)]
-
-        assert state.bounds is not None
-        candidates = []
-        for placement in state.placements:
-            if not self._valid_outer_edge_direction(placement.pose, pose):
-                continue
-
-            anchor_x = placement.x + placement.pose.outer_end.x
-            anchor_y = placement.y + placement.pose.outer_end.y
-            for offset_x, offset_y in self.ANCHOR_OFFSETS:
-                x = anchor_x + offset_x - pose.outer_start.x
-                y = anchor_y + offset_y - pose.outer_start.y
-                bounds = self._merge_bounds(
-                    state.bounds,
-                    (x, y, x + pose.width, y + pose.height),
-                )
-                width, height = self._bounds_size(bounds)
-                anchor_distance = math.hypot(offset_x, offset_y)
-                score = self._layout_score(
-                    width=width,
-                    height=height,
-                    piece_area=state.piece_area + pose.area,
-                    overlap_area=0.0,
-                    outer_edge_penalty=0.0,
-                    anchor_distance=anchor_distance,
-                )
-                candidates.append((score, round(x, 6), round(y, 6), anchor_distance))
-
-        candidates.sort(key=lambda item: item[0])
-        unique_candidates: list[tuple[float, float, float]] = []
-        seen: set[tuple[float, float]] = set()
-        for _, x, y, anchor_distance in candidates:
-            key = (x, y)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique_candidates.append((x, y, anchor_distance))
-            if len(unique_candidates) >= self.MAX_POSITION_CANDIDATES:
-                break
-        return unique_candidates
-
-    @classmethod
-    def _valid_outer_edge_direction(cls, placed_pose: _Pose, next_pose: _Pose) -> bool:
-        diff = abs(
-            cls._normalize_angle(
-                next_pose.outer_start_angle - placed_pose.outer_end_angle
-            )
-        )
-        return diff <= cls.ANGLE_TOLERANCE
-    # @classmethod
-    # def _valid_outer_edge_direction(cls, placed_pose: _Pose, next_pose: _Pose) -> bool:
-    #     diff = abs(
-    #         cls._normalize_angle(
-    #             next_pose.outer_start_angle - placed_pose.outer_end_angle
-    #         )
-    #     )
-    #     return (
-    #         diff <= cls.ANGLE_TOLERANCE
-    #         or abs(diff - math.pi / 2.0) <= cls.ANGLE_TOLERANCE
-    #     )
-
-    def _place_pose(
-        self,
-        state: _SearchState,
-        pose: _Pose,
-        x: float,
-        y: float,
-        outer_edge_penalty: float,
-        anchor_distance: float,
-    ) -> _SearchState:
-        polygon = affinity.translate(pose.polygon, xoff=x, yoff=y)
         bounds = tuple(float(value) for value in polygon.bounds)
-        overlap_area = state.overlap_area + self._overlap_area(
-            polygon,
-            bounds,
-            state.placements,
-        )
-        merged_bounds = self._merge_bounds(state.bounds, bounds)
-        width, height = self._bounds_size(merged_bounds)
-        score = self._layout_score(
-            width=width,
-            height=height,
-            piece_area=state.piece_area + pose.area,
-            overlap_area=overlap_area,
-            outer_edge_penalty=outer_edge_penalty,
-            anchor_distance=anchor_distance,
-        )
 
-        placement = _Placement(
-            piece_id=pose.piece_id,
-            pose=pose,
-            x=x,
-            y=y,
+        return _BoundaryPlacement(
+            piece_id=candidate.piece_id,
+            outer_edge_index=candidate.outer_edge_index,
+            outer_edge_reversed=candidate.outer_edge_reversed,
+            rotation=rotation,
+            target_start=Point(target_start[0], target_start[1]),
             polygon=polygon,
             bounds=bounds,
+            area=float(polygon.area),
         )
-        return _SearchState(
-            placements=state.placements + (placement,),
-            remaining_piece_ids=state.remaining_piece_ids - {pose.piece_id},
-            bounds=merged_bounds,
-            piece_area=state.piece_area + pose.area,
-            overlap_area=overlap_area,
-            outer_edge_penalty=outer_edge_penalty,
-            score=score,
+
+    def _finalize_rectangle_state(
+        self,
+        state: _BoundaryState,
+    ) -> _BoundaryState | None:
+        closing_turn = self._apply_turn(
+            state.turn_signs,
+            state.turn_error,
+            state.heading,
+            0.0,
+            require_turn=True,
+        )
+        if closing_turn is None:
+            return None
+
+        turn_signs, turn_error = closing_turn
+        if len(turn_signs) != self.MAX_TURNS:
+            return None
+
+        perimeter = sum(state.side_lengths)
+        closure_error = math.hypot(state.cursor[0], state.cursor[1])
+        max_closure_error = max(20.0, perimeter * self.RECTANGLE_CLOSURE_TOLERANCE)
+        if closure_error > max_closure_error:
+            return None
+
+        if not self._piece_centers_inside_rectangle(state.placements, state.path_bounds):
+            return None
+
+        final_score = self._final_score(
+            state=state,
+            closure_error=closure_error,
+            turn_error=turn_error,
+        )
+        return replace(
+            state,
+            turn_signs=turn_signs,
+            turn_error=turn_error,
+            score=final_score,
+        )
+
+    def _apply_solution(
+        self,
+        puzzle: dict[int, PuzzlePiece],
+        state: _BoundaryState,
+    ) -> None:
+        for placement in state.placements:
+            piece = puzzle[placement.piece_id]
+            piece._outer_edge = piece.possible_outer_edges[
+                placement.outer_edge_index
+            ]
+            piece.rotate(placement.rotation)
+            from_point = self._outer_edge_points(
+                piece.outer_edge,
+                placement.outer_edge_reversed,
+            )[0]
+            piece.translate(from_point, placement.target_start)
+
+        layout_bounds = self._pieces_bounds(puzzle.values())
+        layout_min_x, layout_min_y, _, _ = layout_bounds
+        for piece in puzzle.values():
+            piece.translate(Point(layout_min_x, layout_min_y), Point(0.0, 0.0))
+
+    @classmethod
+    def _apply_turn(
+        cls,
+        turn_signs: tuple[int, ...],
+        turn_error: float,
+        previous_heading: float,
+        next_heading: float,
+        require_turn: bool,
+    ) -> tuple[tuple[int, ...], float] | None:
+        if not require_turn:
+            return turn_signs, turn_error
+
+        delta = cls._normalize_angle(next_heading - previous_heading)
+        options = (0.0, math.pi / 2.0, -math.pi / 2.0)
+        snapped_turn = min(
+            options,
+            key=lambda option: abs(cls._normalize_angle(delta - option)),
+        )
+        error = abs(cls._normalize_angle(delta - snapped_turn))
+        if error > cls.TURN_TOLERANCE:
+            return None
+
+        if abs(snapped_turn) <= 1e-9:
+            return turn_signs, turn_error + error
+
+        sign = 1 if snapped_turn > 0.0 else -1
+        if turn_signs and turn_signs[0] != sign:
+            return None
+        if len(turn_signs) >= cls.MAX_TURNS:
+            return None
+        return turn_signs + (sign,), turn_error + error
+
+    @classmethod
+    def _snap_axis(cls, angle: float) -> tuple[float, float, int]:
+        normalized = cls._normalize_angle(angle)
+        axis_index = min(
+            range(len(cls.AXIS_ANGLES)),
+            key=lambda index: abs(
+                cls._normalize_angle(normalized - cls.AXIS_ANGLES[index])
+            ),
+        )
+        axis_angle = cls.AXIS_ANGLES[axis_index]
+        error = abs(cls._normalize_angle(normalized - axis_angle))
+        return axis_angle, error, axis_index
+
+    @classmethod
+    def _add_side_length(
+        cls,
+        side_lengths: tuple[float, float, float, float],
+        axis_index: int,
+        length: float,
+    ) -> tuple[float, float, float, float]:
+        mutable = list(side_lengths)
+        mutable[cls.AXIS_SIDE_INDEX[axis_index]] += length
+        return tuple(mutable)  # type: ignore[return-value]
+
+    @classmethod
+    def _partial_score(
+        cls,
+        bounds: tuple[float, float, float, float] | None,
+        path_bounds: tuple[float, float, float, float],
+        piece_area: float,
+        overlap_area: float,
+        outer_edge_penalty: float,
+        turn_error: float,
+    ) -> float:
+        width, height = cls._bounds_size(bounds)
+        path_width, path_height = cls._bounds_size(path_bounds)
+        bounding_area = width * height
+        empty_area = max(0.0, bounding_area - piece_area)
+        aspect_penalty = (
+            cls._aspect_ratio_error(path_width, path_height)
+            * cls.ASPECT_RATIO_PENALTY
+            * 0.25
+        )
+        return (
+            overlap_area * cls.OVERLAP_PENALTY
+            + empty_area * cls.EMPTY_AREA_PENALTY
+            + aspect_penalty
+            + outer_edge_penalty * cls.OUTER_EDGE_TIEBREAKER
+            + turn_error * cls.TURN_ERROR_PENALTY
+        )
+
+    @classmethod
+    def _final_score(
+        cls,
+        state: _BoundaryState,
+        closure_error: float,
+        turn_error: float,
+    ) -> float:
+        east, west, south, north = state.side_lengths
+        horizontal = (east + west) / 2.0
+        vertical = (south + north) / 2.0
+        side_mismatch = abs(east - west) + abs(south - north)
+        path_aspect_error = cls._aspect_ratio_error(horizontal, vertical)
+        width, height = cls._bounds_size(state.bounds)
+        actual_aspect_error = cls._aspect_ratio_error(width, height)
+        overflow = cls._bounds_overflow(state.bounds, state.path_bounds)
+
+        return (
+            state.overlap_area * cls.OVERLAP_PENALTY
+            + cls._empty_area(state.bounds, state.piece_area)
+            * cls.EMPTY_AREA_PENALTY
+            + path_aspect_error * cls.ASPECT_RATIO_PENALTY
+            + actual_aspect_error * cls.ASPECT_RATIO_PENALTY * 0.25
+            + closure_error * cls.CLOSURE_PENALTY
+            + side_mismatch * cls.SIDE_MATCH_PENALTY
+            + overflow * cls.BOUNDS_OVERFLOW_PENALTY
+            + state.outer_edge_penalty * cls.OUTER_EDGE_TIEBREAKER
+            + turn_error * cls.TURN_ERROR_PENALTY
         )
 
     @staticmethod
     def _overlap_area(
         polygon: BaseGeometry,
         bounds: tuple[float, float, float, float],
-        placements: Iterable[_Placement],
+        placements: Iterable[_BoundaryPlacement],
     ) -> float:
         overlap = 0.0
         for placement in placements:
@@ -395,6 +673,24 @@ class BruteForce(Solver):
             intersection = polygon.intersection(placement.polygon)
             overlap += float(intersection.area)
         return overlap
+
+    @staticmethod
+    def _piece_centers_inside_rectangle(
+        placements: Iterable[_BoundaryPlacement],
+        rectangle_bounds: tuple[float, float, float, float],
+    ) -> bool:
+        min_x, min_y, max_x, max_y = rectangle_bounds
+        tolerance = 1e-6
+        for placement in placements:
+            center = placement.polygon.centroid
+            if (
+                center.x < min_x - tolerance
+                or center.x > max_x + tolerance
+                or center.y < min_y - tolerance
+                or center.y > max_y + tolerance
+            ):
+                return False
+        return True
 
     @staticmethod
     def _bounds_overlap(
@@ -408,27 +704,27 @@ class BruteForce(Solver):
             and first[3] > second[1]
         )
 
-    def _apply_solution(
-        self,
-        puzzle: dict[int, PuzzlePiece],
-        state: _SearchState,
-    ) -> None:
-        assert state.bounds is not None
-        layout_min_x, layout_min_y, _, _ = state.bounds
+    @staticmethod
+    def _outer_edge_points(
+        outer_edge: OuterEdge,
+        outer_edge_reversed: bool,
+    ) -> tuple[Point, ...]:
+        if not outer_edge.edges:
+            return ()
 
-        for placement in state.placements:
-            piece = puzzle[placement.piece_id]
-            piece._outer_edge = piece.possible_outer_edges[
-                placement.pose.outer_edge_index
-            ]
-            piece.rotate(placement.pose.rotation)
+        if outer_edge_reversed:
+            edges = list(reversed(outer_edge.edges))
+            return (edges[0].p2, *(edge.p1 for edge in edges))
 
-            current_min_x = min(vertex.x for vertex in piece.polygon.vertices)
-            current_min_y = min(vertex.y for vertex in piece.polygon.vertices)
-            piece.translate(
-                Point(current_min_x, current_min_y),
-                Point(placement.x - layout_min_x, placement.y - layout_min_y),
-            )
+        return (outer_edge.edges[0].p1, *(edge.p2 for edge in outer_edge.edges))
+
+    @staticmethod
+    def _segments(points: tuple[Point, ...]) -> Iterable[tuple[Point, Point]]:
+        return zip(points, points[1:])
+
+    @classmethod
+    def _path_length(cls, points: tuple[Point, ...]) -> float:
+        return sum(start.get_distance_between(end) for start, end in cls._segments(points))
 
     @staticmethod
     def _make_geometry(points: list[tuple[float, float]]) -> BaseGeometry:
@@ -465,6 +761,18 @@ class BruteForce(Solver):
         )
 
     @staticmethod
+    def _pieces_bounds(
+        pieces: Iterable[PuzzlePiece],
+    ) -> tuple[float, float, float, float]:
+        vertices = [vertex for piece in pieces for vertex in piece.polygon.vertices]
+        return (
+            min(vertex.x for vertex in vertices),
+            min(vertex.y for vertex in vertices),
+            max(vertex.x for vertex in vertices),
+            max(vertex.y for vertex in vertices),
+        )
+
+    @staticmethod
     def _bounds_size(
         bounds: tuple[float, float, float, float] | None,
     ) -> tuple[float, float]:
@@ -472,24 +780,26 @@ class BruteForce(Solver):
             return (0.0, 0.0)
         return (bounds[2] - bounds[0], bounds[3] - bounds[1])
 
-    @classmethod
-    def _layout_score(
-        cls,
-        width: float,
-        height: float,
+    @staticmethod
+    def _empty_area(
+        bounds: tuple[float, float, float, float] | None,
         piece_area: float,
-        overlap_area: float,
-        outer_edge_penalty: float,
-        anchor_distance: float,
     ) -> float:
-        bounding_area = width * height
-        empty_area = max(0.0, bounding_area - piece_area)
+        width, height = BruteForce._bounds_size(bounds)
+        return max(0.0, width * height - piece_area)
+
+    @staticmethod
+    def _bounds_overflow(
+        inner: tuple[float, float, float, float] | None,
+        outer: tuple[float, float, float, float],
+    ) -> float:
+        if inner is None:
+            return 0.0
         return (
-            overlap_area * cls.OVERLAP_PENALTY
-            + empty_area * 4
-            + cls._aspect_ratio_error(width, height) * cls.ASPECT_RATIO_PENALTY
-            + outer_edge_penalty * cls.OUTER_EDGE_TIEBREAKER
-            + anchor_distance * cls.ANCHOR_DISTANCE_PENALTY
+            max(0.0, outer[0] - inner[0])
+            + max(0.0, outer[1] - inner[1])
+            + max(0.0, inner[2] - outer[2])
+            + max(0.0, inner[3] - outer[3])
         )
 
     @classmethod
@@ -497,18 +807,6 @@ class BruteForce(Solver):
         if width <= 0.0 or height <= 0.0:
             return 0.0
         return abs(cls._compact_aspect_ratio(width, height) - cls.TARGET_ASPECT_RATIO)
-
-    @classmethod
-    def _target_envelope_area(cls, width: float, height: float) -> float:
-        if width <= 0.0 or height <= 0.0:
-            return 0.0
-        long_side = max(width, height)
-        short_side = min(width, height)
-        target_short_side = long_side * cls.TARGET_ASPECT_RATIO
-        if short_side <= target_short_side:
-            return long_side * target_short_side
-        target_long_side = short_side / cls.TARGET_ASPECT_RATIO
-        return target_long_side * short_side
 
     @staticmethod
     def _compact_aspect_ratio(width: float, height: float) -> float:

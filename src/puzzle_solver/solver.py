@@ -9,6 +9,7 @@ import shutil
 import cv2 as cv
 
 from puzzle_models import SolverPlacement
+from puzzle_solver.utilities.draw_puzzle_piece import render_puzzle_piece
 
 from .brute_force import BruteForce
 from .component import PuzzlePiece, Point
@@ -209,6 +210,11 @@ class PuzzleSolver:
             )
             for piece_id, piece in puzzle_pieces.items()
         }
+
+        for piece_id, piece in puzzle_pieces.items():
+            img = render_puzzle_piece(piece)
+            img.save(self.output_dir / f"piece_{piece_id+1}_edges.png")
+
         solver = self._create_solver(puzzle_pieces)
         ordered_piece_ids = solver.solve(puzzle_pieces)
         logger.info("Solver produced piece order %s", ordered_piece_ids)
