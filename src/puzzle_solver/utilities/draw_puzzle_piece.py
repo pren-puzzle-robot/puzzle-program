@@ -7,9 +7,22 @@ import random
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from ..component.outer_edge import OuterEdge
 from ..component.puzzle_piece import PuzzlePiece
 from ..component.point import Point
 
+
+OUTER_EDGE_COLORS = (
+    (31, 119, 180),
+    (255, 127, 14),
+    (44, 160, 44),
+    (148, 103, 189),
+    (140, 86, 75),
+    (227, 119, 194),
+    (127, 127, 127),
+    (188, 189, 34),
+    (23, 190, 207),
+)
 
 
 def _compute_bounds(piece: PuzzlePiece) -> Tuple[float, float, float, float]:
@@ -22,6 +35,39 @@ def _to_img_coords(p: Point, xmin: float, ymin: float, scale: float, margin: int
     x = int((p.x - xmin) * scale) + margin
     y = int((p.y - ymin) * scale) + margin
     return x, y
+
+
+def _outer_edge_key(outer_edge: OuterEdge) -> tuple[tuple[int, int], ...]:
+    return tuple((edge.i, edge.j) for edge in outer_edge.edges)
+
+
+def _outer_edge_label_position(
+    outer_edge: OuterEdge,
+    xmin: float,
+    ymin: float,
+    scale: float,
+    margin: int,
+) -> tuple[int, int]:
+    points = [edge.p1 for edge in outer_edge.edges] + [outer_edge.edges[-1].p2]
+    mid_x = sum(point.x for point in points) / len(points)
+    mid_y = sum(point.y for point in points) / len(points)
+    return _to_img_coords(Point(mid_x, mid_y), xmin, ymin, scale, margin)
+
+
+def _draw_outer_edge(
+    draw: ImageDraw.ImageDraw,
+    outer_edge: OuterEdge,
+    xmin: float,
+    ymin: float,
+    scale: float,
+    margin: int,
+    color: tuple[int, int, int],
+    width: int,
+) -> None:
+    for edge in outer_edge.edges:
+        x1, y1 = _to_img_coords(edge.p1, xmin, ymin, scale, margin)
+        x2, y2 = _to_img_coords(edge.p2, xmin, ymin, scale, margin)
+        draw.line([(x1, y1), (x2, y2)], fill=color, width=width)
 
 def render_and_show_puzzle_piece(piece: PuzzlePiece) -> None:
     """Render and display the puzzle piece using PIL."""
@@ -37,7 +83,8 @@ def render_puzzle_piece(
     Render the puzzle piece to a new PIL image.
 
     - Polygon outline: black
-    - Outer edges: red
+    - Possible outer edges: colored
+    - Selected outer edge: red
     - Points: small circles with index labels
     - Type text in the top left corner
     """
@@ -71,11 +118,50 @@ def render_puzzle_piece(
         x2, y2 = _to_img_coords(p2, xmin, ymin, scale, margin)
         draw.line([(x1, y1), (x2, y2)], fill=(0, 0, 0), width=2)
 
-    # ----- Highlight outer edges (red, thicker) -----
-    for e in piece.outer_edge.edges:
-        x1, y1 = _to_img_coords(e.p1, xmin, ymin, scale, margin)
-        x2, y2 = _to_img_coords(e.p2, xmin, ymin, scale, margin)
-        draw.line([(x1, y1), (x2, y2)], fill=(255, 0, 0), width=4)
+    selected_outer_edge_key = _outer_edge_key(piece.outer_edge)
+
+    # ----- Draw all possible outer edges (colored) -----
+    for outer_edge_index, outer_edge in enumerate(piece.possible_outer_edges):
+        color = OUTER_EDGE_COLORS[outer_edge_index % len(OUTER_EDGE_COLORS)]
+        _draw_outer_edge(
+            draw,
+            outer_edge,
+            xmin,
+            ymin,
+            scale,
+            margin,
+            color,
+            width=3,
+        )
+        label_x, label_y = _outer_edge_label_position(
+            outer_edge,
+            xmin,
+            ymin,
+            scale,
+            margin,
+        )
+        draw.text(
+            (label_x + 4, label_y + 4),
+            f"OE {outer_edge_index}: {outer_edge.type.value}",
+            fill=color,
+            font=font_small,
+        )
+
+    # ----- Highlight selected outer edge (red, thicker) -----
+    for outer_edge in piece.possible_outer_edges:
+        if _outer_edge_key(outer_edge) != selected_outer_edge_key:
+            continue
+        _draw_outer_edge(
+            draw,
+            outer_edge,
+            xmin,
+            ymin,
+            scale,
+            margin,
+            (255, 0, 0),
+            width=6,
+        )
+        break
 
     # ----- Draw points and indices -----
     r = 4

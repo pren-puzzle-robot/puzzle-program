@@ -66,7 +66,7 @@ def analyze_polygon(poly: Polygon) -> List[OuterEdge]:
 
 
 
-def _edge_can_be_outer(edge: Edge, poly: Polygon, relative_tolerance: float = 1e-2) -> bool:
+def _edge_can_be_outer(edge: Edge, poly: Polygon, relative_tolerance: float = 1e-1) -> bool:
     p1, p2 = edge.p1, edge.p2
     dx = p2.x - p1.x
     dy = p2.y - p1.y
