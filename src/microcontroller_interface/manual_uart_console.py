@@ -19,7 +19,7 @@ class ManualUartConsole:
             baudrate=baudrate,
             timeout_seconds=timeout_seconds,
             ack_timeout_seconds=2.0,
-            done_timeout_seconds=2.0,
+            done_timeout_seconds=10.0,
         )
         self._serial = self._handler.open_serial()
         self._stop_event = threading.Event()

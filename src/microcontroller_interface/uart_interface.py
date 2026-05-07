@@ -190,7 +190,7 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
         port: str,
         baudrate: int = 115200,
         timeout_seconds: float = 1.0,
-        byteorder: str = "<",
+        byteorder: str = ">",
         ack_timeout_seconds: float = 2.0,
         done_timeout_seconds: float = 30.0,
         wait_for_start: bool = True,
@@ -205,6 +205,8 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
         )
         self._handler = handler
         self._session = _UartSession(handler)
+        self._reset_before_first_move_sent = False
+        self._first_move_lock = threading.Lock()
         self.wait_for_start = wait_for_start
 
     def send_move(self, x: int, y: int, rotation: int) -> None:
@@ -215,13 +217,15 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
             command.y,
             command.rotation,
         )
-        self._session.send_payload_with_handshake(self._encode_move(command))
+        self._send_transport_command(command)
 
     def send_command(self, command: SimpleSendCommand) -> None:
         logger.info("Sending UART command %s and waiting for done", command.value)
         self._session.send_payload_with_handshake(
             self._handler.encode_simple_command(command)
         )
+        if command is SimpleSendCommand.RESET:
+            self._reset_before_first_move_sent = True
 
     def wait_for_start_command(self) -> None:
         self._session.ensure_started()
@@ -305,12 +309,25 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
 
     def _send_transport_command(self, command: MoveCommand | SimpleSendCommand) -> None:
         if isinstance(command, MoveCommand):
+            self._send_reset_before_first_move()
             payload = self._encode_move(command)
         else:
             payload = self._handler.encode_simple_command(command)
         self._session.send_payload_with_handshake(payload)
 
-    @staticmethod
-    def _encode_move(command: MoveCommand) -> bytes:
-        # ToDo: switch to the full move payload once the microcontroller supports it.
-        return b"M"
+    def _send_reset_before_first_move(self) -> None:
+        if self._reset_before_first_move_sent:
+            return
+
+        with self._first_move_lock:
+            if self._reset_before_first_move_sent:
+                return
+
+            logger.info("Sending reset command before first move and waiting for done")
+            self._session.send_payload_with_handshake(
+                self._handler.encode_simple_command(SimpleSendCommand.RESET)
+            )
+            self._reset_before_first_move_sent = True
+
+    def _encode_move(self, command: MoveCommand) -> bytes:
+        return self._handler.encode_move_payload(command)

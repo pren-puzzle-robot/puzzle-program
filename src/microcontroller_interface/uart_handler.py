@@ -88,8 +88,8 @@ class UartHandler:
     def encode_move_payload(self, command: MoveCommand) -> bytes:
         x = self.require_uint16(command.x, "x")
         y = self.require_uint16(command.y, "y")
-        rotation = self.require_uint16(command.rotation, "rotation")
-        return b"M" + struct.pack(f"{self.byteorder}HHH", x, y, rotation)
+        # rotation = self.require_uint16(command.rotation, "rotation")
+        return b"M" + struct.pack(f"{self.byteorder}HHH", x, y, 0)
 
     def encode_simple_command(self, command: SimpleSendCommand) -> bytes:
         return command.value.encode("ascii")
