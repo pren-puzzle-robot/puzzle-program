@@ -67,6 +67,10 @@ def build_coordinate_mapper(config: AppConfig) -> CoordinateMapperPort:
     return CoordinateMapper(
         scale_x=config.coordinate_mapper.scale_x,
         scale_y=config.coordinate_mapper.scale_y,
+        auto_calculate_scale=config.coordinate_mapper.auto_calculate_scale,
+        base_plate_width_mm=config.coordinate_mapper.base_plate_width_mm,
+        base_plate_height_mm=config.coordinate_mapper.base_plate_height_mm,
+        steps_per_mm=config.coordinate_mapper.steps_per_mm,
         start_offset=CoordinateOffset(
             x_min=config.coordinate_mapper.start.x_min,
             y_min=config.coordinate_mapper.start.y_min,

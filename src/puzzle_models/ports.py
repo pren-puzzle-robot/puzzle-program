@@ -17,6 +17,7 @@ class CoordinateMapperPort(Protocol):
     def map_to_machine(
         self,
         placements: list[SolverPlacement],
+        frame: str | None = None,
     ) -> list[MachinePlacement]: ...
 
 

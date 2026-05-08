@@ -41,7 +41,10 @@ one level above the `src` folder.
 | `uart` | `wait_for_start` | `false` | If set to `true`, the UART interface waits for the microcontroller start signal before execution begins. |
 | `camera` | `transport` | `mock` | Camera backend. Supported values: `gopro`, `mock`. |
 | `camera` | `mock_image` | `data/with_aruco2_flattened.JPG` | Image path used when `camera.transport = mock`. Relative paths are resolved from the folder containing `config.ini`. |
-| `coordinate_mapper` | `scale_x`, `scale_y` | `1.0`, `1.0` | Shared machine-units-per-solver-unit scale used for both `start` and `end` coordinates. `scale_x = machine_dx / solver_dx` |
+| `coordinate_mapper` | `scale_x`, `scale_y` | `1.0`, `1.0` | Fixed machine-units-per-solver-unit scales used when `auto_calculate_scale = false`. |
+| `coordinate_mapper` | `auto_calculate_scale` | `false` | If `true`, derive `scale_x` and `scale_y` from the captured frame size and configured base-plate dimensions instead of using `scale_x` and `scale_y` directly. |
+| `coordinate_mapper` | `base_plate_width_mm`, `base_plate_height_mm` | empty | Physical size of the captured base plate in millimeters. Required when `auto_calculate_scale = true`. |
+| `coordinate_mapper` | `steps_per_mm` | `80.0` | Machine conversion factor used for auto-calculated scales. |
 | `coordinate_mapper.start` | `x_min`, `y_min` | `0.0`, `0.0` | Machine-space offset where solver `start` coordinate `(0, 0)` is placed.  |
 | `coordinate_mapper.end` | `x_min`, `y_min` | `0.0`, `0.0` | Machine-space offset where solver `end` coordinate `(0, 0)` is placed. |
 | `solver` | `algorithm` | `fast` | Algorithm to use for solving the puzzle. Supported values: `fast`, `greedy`, `brute_force`. `brute_force` combines detected outer edges into a closed rectangular boundary and scores layouts whose short-to-long side ratio is close to `1:sqrt(2)`. |
@@ -56,6 +59,10 @@ The coordinate mapper uses:
 and
 `machine_y = y_min + solver_y * scale_y`
 with separate `x_min` and `y_min` offsets for `start` and `end`.
+
+If `auto_calculate_scale = true`, the scales are calculated from the captured frame dimensions:
+`scale_x = (base_plate_width_mm * steps_per_mm) / frame_width_px`
+`scale_y = (base_plate_height_mm * steps_per_mm) / frame_height_px`
 
 ## Microcontroller Protocol Notes
 

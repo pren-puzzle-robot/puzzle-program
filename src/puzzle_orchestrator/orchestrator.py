@@ -39,7 +39,7 @@ class PuzzleOrchestrator:
         grid_path = self.puzzle_solver.solve(frame)
         logger.info("Solver produced %d placement steps", len(grid_path))
 
-        machine_path = self.coordinate_mapper.map_to_machine(grid_path)
+        machine_path = self.coordinate_mapper.map_to_machine(grid_path, frame=frame)
         logger.info("Mapped %d machine placements", len(machine_path))
 
         result = self.microcontroller_interface.send_path(machine_path)

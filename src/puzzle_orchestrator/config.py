@@ -45,6 +45,10 @@ class CoordinateOffsetConfig:
 class CoordinateMapperConfig:
     scale_x: float
     scale_y: float
+    auto_calculate_scale: bool
+    base_plate_width_mm: float | None
+    base_plate_height_mm: float | None
+    steps_per_mm: float
     start: CoordinateOffsetConfig
     end: CoordinateOffsetConfig
 
@@ -92,6 +96,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "coordinate_mapper": {
                 "scale_x": "1.0",
                 "scale_y": "1.0",
+                "auto_calculate_scale": "false",
+                "base_plate_width_mm": "",
+                "base_plate_height_mm": "",
+                "steps_per_mm": "80.0",
             },
             "coordinate_mapper.start": {
                 "x_min": "0.0",
@@ -135,6 +143,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         coordinate_mapper=CoordinateMapperConfig(
             scale_x=parser.getfloat("coordinate_mapper", "scale_x"),
             scale_y=parser.getfloat("coordinate_mapper", "scale_y"),
+            auto_calculate_scale=parser.getboolean("coordinate_mapper", "auto_calculate_scale"),
+            base_plate_width_mm=_optional_float(
+                parser.get("coordinate_mapper", "base_plate_width_mm")
+            ),
+            base_plate_height_mm=_optional_float(
+                parser.get("coordinate_mapper", "base_plate_height_mm")
+            ),
+            steps_per_mm=parser.getfloat("coordinate_mapper", "steps_per_mm"),
             start=_read_coordinate_offset(parser, "coordinate_mapper.start"),
             end=_read_coordinate_offset(parser, "coordinate_mapper.end"),
         ),
@@ -158,6 +174,13 @@ def _optional_value(value: str) -> str | None:
     if not value or value.lower() in {"none", "null"}:
         return None
     return value
+
+
+def _optional_float(value: str) -> float | None:
+    parsed = _optional_value(value)
+    if parsed is None:
+        return None
+    return float(parsed)
 
 
 def _read_coordinate_offset(
