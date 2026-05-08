@@ -106,6 +106,7 @@ class CoordinateMapper:
         scale_y: float,
     ) -> tuple[float, float]:
         return (
-            offset.x_min + float(point[0]) * scale_x,
-            offset.y_min + float(point[1]) * scale_y,
+            offset.x_min - float(point[1]) * scale_y,
+            offset.y_min + float(point[0]) * scale_x,
+
         )

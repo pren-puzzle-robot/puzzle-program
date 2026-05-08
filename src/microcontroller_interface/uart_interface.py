@@ -304,8 +304,11 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
             SimpleSendCommand.LOWER,
             SimpleSendCommand.HOLD_OFF,
             SimpleSendCommand.LIFT,
+            SimpleSendCommand.RESET,
         ):
             self._send_transport_command(command)
+            # ToDo: Remove wait
+            time.sleep(1.5)
 
     def _send_transport_command(self, command: MoveCommand | SimpleSendCommand) -> None:
         if isinstance(command, MoveCommand):

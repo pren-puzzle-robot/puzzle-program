@@ -88,6 +88,7 @@ class UartHandler:
     def encode_move_payload(self, command: MoveCommand) -> bytes:
         x = self.require_uint16(command.x, "x")
         y = self.require_uint16(command.y, "y")
+        # ToDo: Add rotation once Microcontroller Supports it
         # rotation = self.require_uint16(command.rotation, "rotation")
         return b"M" + struct.pack(f"{self.byteorder}HHH", x, y, 0)
 
@@ -200,7 +201,5 @@ class UartHandler:
     def send_move(self, connection, command: MoveCommand) -> None:
         self.send_payload_with_handshake(
             connection,
-            # ToDo: use correct payload encoding once Microcontroller Supports it
-            # "M".encode("ascii"),
             self.encode_move_payload(command),
         )
