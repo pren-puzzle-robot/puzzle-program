@@ -50,6 +50,7 @@ one level above the `src` folder.
 | `solver` | `algorithm` | `fast` | Algorithm to use for solving the puzzle. Supported values: `fast`, `greedy`, `brute_force`. `brute_force` combines detected outer edges into a closed rectangular boundary and scores layouts whose short-to-long side ratio is close to `1:sqrt(2)`. |
 | `solver` | `min_area` | `60000` | Minimum contour area passed to `PuzzleSolver`. |
 | `solver` | `threshold` | `none` | `0` - `255`, `none`, or `otsu`. Set to `none` or `otsu` to use Otsu thresholding. |
+| `solver` | `piece_margin` | `0.0` | Non-negative outward margin added to each detected piece polygon when the `PuzzlePiece` is created. The buffered outline becomes the actual shape used for edge analysis and solving. |
 
 For local testing without hardware, set `camera.transport = mock` and
 `microcontroller.transport = stub` in `config.ini`.

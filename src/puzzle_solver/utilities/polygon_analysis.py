@@ -168,14 +168,21 @@ def _build_edge_chains(edges: List[Edge]) -> List[List[Edge]]:
 
         # walk backwards to the start of this chain
         current = edge
-        while current.i in by_end and by_end[current.i] is not current and by_end[current.i] not in visited:
-            current = by_end[current.i]
+        backward_seen = {current}
+        while current.i in by_end:
+            previous = by_end[current.i]
+            if previous is current or previous in visited or previous in backward_seen:
+                break
+            current = previous
+            backward_seen.add(current)
 
         # walk forwards to build the full chain
         chain: List[Edge] = []
-        while current not in visited:
+        chain_seen = set()
+        while current not in visited and current not in chain_seen:
             chain.append(current)
             visited.add(current)
+            chain_seen.add(current)
 
             if current.j in by_start and by_start[current.j] not in visited:
                 current = by_start[current.j]

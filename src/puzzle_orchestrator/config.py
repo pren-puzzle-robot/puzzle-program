@@ -58,6 +58,7 @@ class SolverConfig:
     algorithm: str
     min_area: int
     threshold_value: str | None
+    piece_margin: float
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
                 "algorithm": "fast",
                 "min_area": "60000",
                 "threshold": "none",
+                "piece_margin": "0.0",
             },
         }
     )
@@ -158,6 +160,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             algorithm=parser.get("solver", "algorithm").strip().lower(),
             min_area=parser.getint("solver", "min_area"),
             threshold_value=_optional_value(parser.get("solver", "threshold")),
+            piece_margin=_non_negative_float(
+                parser.get("solver", "piece_margin"),
+                "solver.piece_margin",
+            ),
         ),
     )
 
@@ -181,6 +187,17 @@ def _optional_float(value: str) -> float | None:
     if parsed is None:
         return None
     return float(parsed)
+
+
+def _non_negative_float(value: str, name: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+
+    if parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative")
+    return parsed
 
 
 def _read_coordinate_offset(

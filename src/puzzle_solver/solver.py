@@ -31,6 +31,7 @@ class PuzzleSolver:
         variant: str = "fast",
         min_area: int | str = 60000,
         threshold_value: int | str | None = 140,
+        piece_margin: float | str = 0.0,
     ) -> None:
         self.output_dir = (
             Path(output_dir) if output_dir is not None else Path(__file__).with_name("output")
@@ -38,6 +39,19 @@ class PuzzleSolver:
         self.variant = variant
         self.min_area = min_area
         self.threshold_value = threshold_value
+        self.piece_margin = self._validate_piece_margin(piece_margin)
+
+    @staticmethod
+    def _validate_piece_margin(value: float | str) -> float:
+        try:
+            margin = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("piece_margin must be a number") from exc
+
+        if margin < 0.0:
+            raise ValueError("piece_margin must be non-negative")
+
+        return margin
 
     def _prepare_output_dir(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -53,7 +67,7 @@ class PuzzleSolver:
         puzzle_pieces: dict[int, PuzzlePiece] = {}
         for index, (filename, corner_list) in enumerate(corners):
             points = [Point(x=float(x), y=float(y)) for x, y in corner_list]
-            piece = PuzzlePiece(points)
+            piece = PuzzlePiece(points, margin=self.piece_margin)
             puzzle_pieces[index] = piece
             logger.debug("Created PuzzlePiece %d from %s", index, filename)
 
@@ -174,8 +188,9 @@ class PuzzleSolver:
         )
 
         logger.info(
-            "Normalized solved puzzle layout by aspect ratio%s",
+            "Normalized solved puzzle layout by aspect ratio%s using piece margin %.6f",
             " with 90 degree rotation to landscape" if rotate_to_landscape else "",
+            self.piece_margin,
         )
         return transformed_centers, transformed_rotations, normalized_debug_pieces
 
@@ -221,8 +236,8 @@ class PuzzleSolver:
         self._save_debug_image(puzzle_pieces)
         normalized_end_positions, normalized_rotations, normalized_debug_pieces = (
             self._normalize_end_layout(
-            puzzle_pieces,
-            ordered_piece_ids,
+                puzzle_pieces,
+                ordered_piece_ids,
             )
         )
         self._save_debug_image(normalized_debug_pieces, "solved_puzzle_normalized.png")

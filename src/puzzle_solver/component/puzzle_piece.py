@@ -2,6 +2,10 @@ from __future__ import annotations
 import logging
 from typing import Iterable, List
 
+from shapely.geometry import MultiPolygon
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry.polygon import orient
+
 from .point import Point
 from .polygon import Polygon
 from .outer_edge import OuterEdge, PieceType
@@ -26,12 +30,16 @@ class PuzzlePiece:
     _rotation: float = 0.0  # in radians
     _translation: tuple[float, float] = (0.0, 0.0)
 
-    def __init__(self, points: Iterable[Point]) -> None:
+    def __init__(self, points: Iterable[Point], margin: float = 0.0) -> None:
         points_list: List[Point] = list(points)
         if len(points_list) < 3:
             raise ValueError("PuzzlePiece requires at least 3 points")
+        if margin < 0.0:
+            raise ValueError("PuzzlePiece margin must be non-negative")
 
         self._translation: tuple[float, float] = (0.0, 0.0)
+        if margin > 0.0:
+            points_list = self._expand_points(points_list, margin)
         self._polygon = Polygon(points_list)
 
         # First analysis
@@ -45,6 +53,28 @@ class PuzzlePiece:
         final_analysis = analyze_polygon(self._polygon)
         self._possible_outer_edges = final_analysis
         self._outer_edge = final_analysis[0]
+
+    @staticmethod
+    def _expand_points(points: List[Point], margin: float) -> List[Point]:
+        polygon = ShapelyPolygon([(point.x, point.y) for point in points])
+        if polygon.is_empty:
+            raise ValueError("PuzzlePiece margin expansion requires a non-empty polygon")
+
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+
+        expanded = polygon.buffer(margin, join_style="mitre")
+        if expanded.is_empty:
+            raise ValueError("PuzzlePiece margin expansion produced an empty polygon")
+
+        if isinstance(expanded, MultiPolygon):
+            expanded = max(expanded.geoms, key=lambda geom: geom.area)
+
+        if not isinstance(expanded, ShapelyPolygon):
+            raise ValueError("PuzzlePiece margin expansion did not produce a polygon")
+
+        expanded = orient(expanded, sign=1.0)
+        return [Point(float(x), float(y)) for x, y in expanded.exterior.coords[:-1]]
 
     # def _normalize_vertex_order(self, analysis: PieceAnalysis) -> None:
     #     """

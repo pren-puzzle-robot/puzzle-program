@@ -60,6 +60,7 @@ def build_puzzle_solver(config: AppConfig) -> PuzzleSolverPort:
         min_area=config.solver.min_area,
         threshold_value=config.solver.threshold_value,
         variant=config.solver.algorithm,
+        piece_margin=config.solver.piece_margin,
     )
 
 
