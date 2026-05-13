@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -8,6 +9,8 @@ import cv2
 from puzzle_models import MachinePlacement, SolverPlacement
 
 logger = logging.getLogger(__name__)
+
+FULL_TURN_UNITS = 1600.0
 
 
 @dataclass(frozen=True)
@@ -55,7 +58,7 @@ class CoordinateMapper:
                 piece_id=placement.piece_id,
                 start=self._map_point(placement.start, self.start_offset, scale_x, scale_y),
                 end=self._map_point(placement.end, self.end_offset, scale_x, scale_y),
-                rotation=float(placement.rotation),
+                rotation=self._map_rotation(placement.rotation),
             )
             for placement in placements
         ]
@@ -110,3 +113,8 @@ class CoordinateMapper:
             offset.y_min + float(point[0]) * scale_x,
 
         )
+
+    @staticmethod
+    def _map_rotation(rotation_radians: float) -> float:
+        normalized_radians = float(rotation_radians) % (2.0 * math.pi)
+        return normalized_radians * (FULL_TURN_UNITS / (2.0 * math.pi))

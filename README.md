@@ -60,6 +60,8 @@ The coordinate mapper uses:
 and
 `machine_y = y_min + solver_y * scale_y`
 with separate `x_min` and `y_min` offsets for `start` and `end`.
+Target rotation is normalized from solver radians into the range `0` to `<1600`,
+where `1600` represents one full turn.
 
 If `auto_calculate_scale = true`, the scales are calculated from the captured frame dimensions:
 `scale_x = (base_plate_width_mm * steps_per_mm) / frame_width_px`
