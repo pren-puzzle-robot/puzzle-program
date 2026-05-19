@@ -239,6 +239,9 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
             self._handler.port,
         )
         self._session.wait_for_event({START_COMMAND}, timeout_seconds=float("inf"))
+
+        self.send_command(SimpleSendCommand.RESET)
+        self.send_move(x=20_000, y=19_000)
         logger.info("Received start command '%s'", START_COMMAND.value)
 
     def send_path(self, machine_points: list[MachinePlacement]) -> str:
