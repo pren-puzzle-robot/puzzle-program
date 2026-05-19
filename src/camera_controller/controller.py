@@ -4,11 +4,17 @@ import json
 import logging
 from pathlib import Path
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
 import cv2
 import numpy as np
+
+from .exceptions import (
+    ArucoMarkersError,
+    CameraConnectionError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +64,7 @@ class CameraController:
                 last_error = exc
                 logger.debug("Request to %s failed: %s", url, exc)
 
-        raise RuntimeError(f"All media list endpoints failed: {urls}") from last_error
+        raise CameraConnectionError(f"All media list endpoints failed: {urls}") from last_error
 
     def _try_send_get(self, urls: list[str]) -> None:
         last_error: Exception | None = None
@@ -70,13 +76,18 @@ class CameraController:
                 last_error = exc
                 logger.debug("Request to %s failed: %s", url, exc)
 
-        raise RuntimeError(f"All shutter endpoints failed: {urls}") from last_error
+        raise CameraConnectionError(f"All shutter endpoints failed: {urls}") from last_error
 
     def _download_file(self, source_url: str, destination: Path) -> None:
         logger.debug("Downloading %s to %s", source_url, destination)
         req = urllib.request.Request(url=source_url, method="GET")
-        with urllib.request.urlopen(req, timeout=self.request_timeout_seconds) as response:
-            destination.write_bytes(response.read())
+        try:
+            with urllib.request.urlopen(req, timeout=self.request_timeout_seconds) as response:
+                destination.write_bytes(response.read())
+        except urllib.error.URLError as exc:
+            raise CameraConnectionError(
+                f"Failed to download captured image from {source_url}"
+            ) from exc
 
     def _undistort_image(self, source: Path) -> Path:
         logger.info("Undistorting captured image using calibration %s", self.calibration_file)
@@ -202,7 +213,7 @@ class CameraController:
         _, corners, ids = self._detect_aruco_markers(image, dictionary_name)
 
         if ids is None:
-            raise RuntimeError("No ArUco markers detected in image")
+            raise ArucoMarkersError("No ArUco markers detected in image")
 
         detected_marker_corners: dict[int, np.ndarray] = {}
         for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
@@ -212,7 +223,9 @@ class CameraController:
             marker_id for marker_id in marker_ids if marker_id not in detected_marker_corners
         ]
         if missing_marker_ids:
-            raise RuntimeError(f"Missing required ArUco markers: {missing_marker_ids}")
+            raise ArucoMarkersError(
+                f"Missing required ArUco markers: {missing_marker_ids}"
+            )
 
         # OpenCV returns ArUco corners in marker order:
         # top-left, top-right, bottom-right, bottom-left.
@@ -369,17 +382,17 @@ class CameraController:
         media = self._try_get_json(media_list_urls)
         folders = media.get("media", [])
         if not folders:
-            raise RuntimeError("GoPro media list is empty; no image captured.")
+            raise CameraConnectionError("GoPro media list is empty; no image captured.")
 
         latest_folder = folders[-1]
         folder_name = latest_folder.get("d")
         files = latest_folder.get("fs", [])
         if not folder_name or not files:
-            raise RuntimeError("GoPro media folder is missing files.")
+            raise CameraConnectionError("GoPro media folder is missing files.")
 
         latest_file = files[-1].get("n")
         if not latest_file:
-            raise RuntimeError("GoPro latest media item has no filename.")
+            raise CameraConnectionError("GoPro latest media item has no filename.")
 
         encoded_folder = urllib.parse.quote(folder_name)
         encoded_file = urllib.parse.quote(latest_file)

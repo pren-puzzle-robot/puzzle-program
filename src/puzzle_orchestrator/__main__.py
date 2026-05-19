@@ -9,6 +9,7 @@ from microcontroller_interface import (
 from puzzle_models import CameraPort, CoordinateMapperPort, MicrocontrollerPort, PuzzleSolverPort
 from puzzle_solver import PuzzleSolver
 
+from .audio import SoundPlayer
 from .config import AppConfig, load_config
 from .orchestrator import PuzzleOrchestrator
 
@@ -87,19 +88,57 @@ def main() -> None:
     config = load_config()
     configure_logging(config)
     logger = logging.getLogger(__name__)
+    sound_player = SoundPlayer.from_config(config.audio)
+
+    try:
+        camera_controller = build_camera_controller(config)
+    except Exception as exc:
+        logger.exception("Failed to build camera controller")
+        sound_player.play_camera_error(exc)
+        setattr(exc, "_puzzle_error_sound_played", True)
+        raise
+
+    try:
+        puzzle_solver = build_puzzle_solver(config)
+    except Exception as exc:
+        logger.exception("Failed to build puzzle solver")
+        sound_player.play_solver_error(exc)
+        setattr(exc, "_puzzle_error_sound_played", True)
+        raise
+
+    try:
+        coordinate_mapper = build_coordinate_mapper(config)
+    except Exception as exc:
+        logger.exception("Failed to build coordinate mapper")
+        sound_player.play_coordinate_mapper_error(exc)
+        setattr(exc, "_puzzle_error_sound_played", True)
+        raise
+
+    try:
+        microcontroller_interface = build_microcontroller_interface(config)
+    except Exception as exc:
+        logger.exception("Failed to build microcontroller interface")
+        sound_player.play_microcontroller_error(exc)
+        setattr(exc, "_puzzle_error_sound_played", True)
+        raise
+
     orchestrator = PuzzleOrchestrator(
-        camera_controller=build_camera_controller(config),
-        puzzle_solver=build_puzzle_solver(config),
-        coordinate_mapper=build_coordinate_mapper(config),
-        microcontroller_interface=build_microcontroller_interface(config),
+        camera_controller=camera_controller,
+        puzzle_solver=puzzle_solver,
+        coordinate_mapper=coordinate_mapper,
+        microcontroller_interface=microcontroller_interface,
+        sound_player=sound_player,
     )
     try:
         result = orchestrator.run_once()
-    except Exception:
+    except Exception as exc:
         logger.exception("Puzzle run failed")
+        if not getattr(exc, "_puzzle_error_sound_played", False):
+            sound_player.play_unexpected_error(exc)
         raise
 
     logger.info("Puzzle run completed with result=%s", result)
+    sound_player.play_success()
     print(result)
 
 

@@ -32,6 +32,9 @@ one level above the `src` folder.
 | Section | Key | Default | Description |
 | --- | --- | --- | --- |
 | `logging` | `level` | `DEBUG` | Python logging level used by `puzzle_orchestrator`, for example `DEBUG`, `INFO`, or `WARNING`. |
+| `audio` | `enabled` | `false` | Enables error sound playback. |
+| `audio` | `success`, `camera_error`, `solver_error`, `coordinate_mapper_error`, `microcontroller_error`, `unexpected_error` | empty | Optional audio file paths for completion and error categories. Relative paths are resolved from the folder containing `config.ini`. |
+| `audio.error_sounds` | `<stage>.<ExceptionType>`, `<stage>.default`, `<ExceptionType>`, `default` | empty | Optional fine-grained sound rules. Matching order is `stage.ExceptionType`, then `stage.default`, then `ExceptionType`, then `default`. Exception inheritance is respected, so e.g. `TimeoutError` also matches `OSError` and `Exception` fallbacks. |
 | `microcontroller` | `transport` | `stub` | Microcontroller backend. Supported values: `uart`, `stub`. `stub` skips real UART communication. |
 | `uart` | `port` | `/dev/serial0` | UART device path, for example `COM3` on Windows. |
 | `uart` | `baudrate` | `57600` | UART baud rate. Must match microcontroller firmware configuration. |
@@ -54,6 +57,28 @@ one level above the `src` folder.
 
 For local testing without hardware, set `camera.transport = mock` and
 `microcontroller.transport = stub` in `config.ini`.
+
+Example audio configuration:
+
+```ini
+[audio]
+enabled = true
+success = sounds/happy_wheels_victory.wav
+camera_error = sounds/camera_error.wav
+solver_error = sounds/solver_error.wav
+coordinate_mapper_error = sounds/coordinate_mapper_error.wav
+microcontroller_error = sounds/microcontroller_error.wav
+unexpected_error = sounds/unexpected_error.wav
+```
+
+Example with different sounds for specific errors:
+
+```ini
+[audio.error_sounds]
+camera.CameraConnectionError = sounds/gopro_connection_error.wav
+camera.ArucoMarkersError = sounds/aruco_not_found.wav
+microcontroller.TimeoutError = sounds/microcontroller_connection_timeout.wav
+```
 
 The coordinate mapper uses:
 `machine_x = x_min + solver_x * scale_x`

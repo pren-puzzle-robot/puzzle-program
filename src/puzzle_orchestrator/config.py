@@ -15,6 +15,18 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class AudioConfig:
+    enabled: bool
+    success: Path | None
+    camera_error: Path | None
+    solver_error: Path | None
+    coordinate_mapper_error: Path | None
+    microcontroller_error: Path | None
+    unexpected_error: Path | None
+    error_sound_rules: dict[str, Path]
+
+
+@dataclass(frozen=True)
 class MicrocontrollerConfig:
     transport: str
 
@@ -64,6 +76,7 @@ class SolverConfig:
 @dataclass(frozen=True)
 class AppConfig:
     logging: LoggingConfig
+    audio: AudioConfig
     microcontroller: MicrocontrollerConfig
     uart: UartConfig
     camera: CameraConfig
@@ -81,6 +94,16 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     parser.read_dict(
         {
             "logging": {"level": "DEBUG"},
+            "audio": {
+                "enabled": "false",
+                "success": "",
+                "camera_error": "",
+                "solver_error": "",
+                "coordinate_mapper_error": "",
+                "microcontroller_error": "",
+                "unexpected_error": "",
+            },
+            "audio.error_sounds": {},
             "microcontroller": {"transport": "uart"},
             "uart": {
                 "port": "/dev/serial0",
@@ -123,6 +146,38 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     return AppConfig(
         logging=LoggingConfig(
             level=parser.get("logging", "level").strip(),
+        ),
+        audio=AudioConfig(
+            enabled=parser.getboolean("audio", "enabled"),
+            success=_optional_path(
+                parser.get("audio", "success"),
+                config_path.parent,
+            ),
+            camera_error=_optional_path(
+                parser.get("audio", "camera_error"),
+                config_path.parent,
+            ),
+            solver_error=_optional_path(
+                parser.get("audio", "solver_error"),
+                config_path.parent,
+            ),
+            coordinate_mapper_error=_optional_path(
+                parser.get("audio", "coordinate_mapper_error"),
+                config_path.parent,
+            ),
+            microcontroller_error=_optional_path(
+                parser.get("audio", "microcontroller_error"),
+                config_path.parent,
+            ),
+            unexpected_error=_optional_path(
+                parser.get("audio", "unexpected_error"),
+                config_path.parent,
+            ),
+            error_sound_rules=_read_audio_error_sound_rules(
+                parser,
+                "audio.error_sounds",
+                config_path.parent,
+            ),
         ),
         microcontroller=MicrocontrollerConfig(
             transport=parser.get("microcontroller", "transport").strip().lower(),
@@ -175,6 +230,13 @@ def _resolve_config_path(value: str, config_dir: Path) -> Path:
     return config_dir / path
 
 
+def _optional_path(value: str, config_dir: Path) -> Path | None:
+    parsed = _optional_value(value)
+    if parsed is None:
+        return None
+    return _resolve_config_path(parsed, config_dir)
+
+
 def _optional_value(value: str) -> str | None:
     value = value.strip()
     if not value or value.lower() in {"none", "null"}:
@@ -210,3 +272,20 @@ def _read_coordinate_offset(
         x_min=x_min,
         y_min=y_min,
     )
+
+
+def _read_audio_error_sound_rules(
+    parser: ConfigParser,
+    section: str,
+    config_dir: Path,
+) -> dict[str, Path]:
+    if not parser.has_section(section):
+        return {}
+
+    rules: dict[str, Path] = {}
+    for key, value in parser.items(section):
+        resolved = _optional_path(value, config_dir)
+        if resolved is None:
+            continue
+        rules[key.strip().lower()] = resolved
+    return rules
