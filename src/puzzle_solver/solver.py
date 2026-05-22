@@ -84,7 +84,10 @@ class PuzzleSolver:
 
     def _create_solver(self, puzzle_pieces: dict[int, PuzzlePiece]) -> Solver:
         if self.variant in {"brute_force", "bruteforce", "brute"}:
-            return BruteForce()
+            return BruteForce(
+                debug_output_dir=self.output_dir / "brute_force_states",
+                render_states=True,
+            )
 
         if self.variant == "greedy":
             return Greedy(puzzle_pieces)

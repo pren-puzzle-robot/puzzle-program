@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, replace
 import logging
 import math
+from pathlib import Path
 from typing import Iterable
 
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry.base import BaseGeometry
 
 from .component import OuterEdge, Point, PuzzlePiece
-from .utilities import Solver
+from .utilities import Solver, print_whole_puzzle_image
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +95,16 @@ class BruteForce(Solver):
     # Stored as east, west, south, north for easy opposite-side comparison.
     AXIS_SIDE_INDEX = (0, 2, 1, 3)
 
-    @classmethod
-    def solve(cls, puzzle: dict[int, PuzzlePiece]) -> list[int]:
-        solver = cls()
-        return solver._solve(puzzle)
+    def __init__(
+        self,
+        debug_output_dir: Path | None = None,
+        render_states: bool = False,
+    ) -> None:
+        self.debug_output_dir = debug_output_dir
+        self.render_states = render_states
+
+    def solve(self, puzzle: dict[int, PuzzlePiece]) -> list[int]:
+        return self._solve(puzzle)
 
     def _solve(self, puzzle: dict[int, PuzzlePiece]) -> list[int]:
         if not puzzle:
@@ -111,6 +119,7 @@ class BruteForce(Solver):
             piece_id: max(candidate.length for candidate in candidates)
             for piece_id, candidates in candidates_by_piece.items()
         }
+        anchor_piece_id = self._select_anchor_piece(best_outer_lengths)
 
         states: list[_BoundaryState] = [
             _BoundaryState(
@@ -135,7 +144,12 @@ class BruteForce(Solver):
         for depth in range(len(puzzle)):
             next_states: list[_BoundaryState] = []
             for state in states:
-                for piece_id in sorted(state.remaining_piece_ids):
+                candidate_piece_ids = (
+                    (anchor_piece_id,)
+                    if not state.placements and anchor_piece_id in state.remaining_piece_ids
+                    else sorted(state.remaining_piece_ids)
+                )
+                for piece_id in candidate_piece_ids:
                     outer_edge_penalty_base = state.outer_edge_penalty
                     for candidate in candidates_by_piece[piece_id]:
                         outer_edge_penalty = (
@@ -162,6 +176,7 @@ class BruteForce(Solver):
                 max_states_per_depth,
                 max_states_per_prune_bucket,
             )
+            self._render_search_states(puzzle, depth + 1, states)
             logger.debug(
                 "Brute-force boundary depth %d retained %d states; best score %.2f",
                 depth + 1,
@@ -180,6 +195,7 @@ class BruteForce(Solver):
             )
 
         best = min(completed, key=lambda item: item.score)
+        self._render_completed_states(puzzle, completed, best)
         self._apply_solution(puzzle, best)
 
         order = [placement.piece_id for placement in best.placements]
@@ -189,9 +205,10 @@ class BruteForce(Solver):
             best.overlap_area / best.piece_area if best.piece_area > 0.0 else 0.0
         )
         logger.info(
-            "Brute-force solver selected order %s, boundary %.1fx%.1f, "
+            "Brute-force solver selected order %s with anchor piece %d, boundary %.1fx%.1f, "
             "layout %.1fx%.1f, boundary aspect %.3f, overlap ratio %.5f",
             order,
+            anchor_piece_id,
             path_width,
             path_height,
             width,
@@ -200,6 +217,89 @@ class BruteForce(Solver):
             overlap_ratio,
         )
         return order
+
+    @staticmethod
+    def _select_anchor_piece(best_outer_lengths: dict[int, float]) -> int:
+        return max(
+            best_outer_lengths,
+            key=lambda piece_id: (best_outer_lengths[piece_id], -piece_id),
+        )
+
+    def _render_search_states(
+        self,
+        puzzle: dict[int, PuzzlePiece],
+        depth: int,
+        states: list[_BoundaryState],
+    ) -> None:
+        if not self.render_states or self.debug_output_dir is None:
+            return
+
+        depth_dir = self.debug_output_dir / f"depth_{depth:02d}"
+        depth_dir.mkdir(parents=True, exist_ok=True)
+        for state_index, state in enumerate(states):
+            self._render_state_image(
+                puzzle,
+                state,
+                depth_dir / f"state_{state_index:04d}_score_{state.score:.2f}.png",
+            )
+
+    def _render_completed_states(
+        self,
+        puzzle: dict[int, PuzzlePiece],
+        completed: list[_BoundaryState],
+        best: _BoundaryState,
+    ) -> None:
+        if not self.render_states or self.debug_output_dir is None:
+            return
+
+        completed_dir = self.debug_output_dir / "completed"
+        completed_dir.mkdir(parents=True, exist_ok=True)
+        for state_index, state in enumerate(sorted(completed, key=lambda item: item.score)):
+            label = "best" if state is best else "candidate"
+            self._render_state_image(
+                puzzle,
+                state,
+                completed_dir / (
+                    f"{label}_{state_index:04d}_score_{state.score:.2f}.png"
+                ),
+            )
+
+    def _render_state_image(
+        self,
+        puzzle: dict[int, PuzzlePiece],
+        state: _BoundaryState,
+        output_path: Path,
+    ) -> None:
+        if not state.placements:
+            return
+
+        pieces = self._materialize_state_pieces(puzzle, state)
+        image = print_whole_puzzle_image(pieces)
+        image.save(output_path)
+
+    def _materialize_state_pieces(
+        self,
+        puzzle: dict[int, PuzzlePiece],
+        state: _BoundaryState,
+    ) -> dict[int, PuzzlePiece]:
+        rendered_pieces: dict[int, PuzzlePiece] = {}
+        for placement in state.placements:
+            piece = copy.deepcopy(puzzle[placement.piece_id])
+            piece._outer_edge = piece.possible_outer_edges[placement.outer_edge_index]
+            piece.rotate(placement.rotation)
+            from_point = self._outer_edge_points(
+                piece.outer_edge,
+                placement.outer_edge_reversed,
+            )[0]
+            piece.translate(from_point, placement.target_start)
+            rendered_pieces[placement.piece_id] = piece
+
+        layout_bounds = self._pieces_bounds(rendered_pieces.values())
+        layout_min_x, layout_min_y, _, _ = layout_bounds
+        for piece in rendered_pieces.values():
+            piece.translate(Point(layout_min_x, layout_min_y), Point(0.0, 0.0))
+
+        return rendered_pieces
 
     def _build_boundary_candidates(
         self,
