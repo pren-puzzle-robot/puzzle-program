@@ -54,6 +54,7 @@ one level above the `src` folder.
 | `solver` | `min_area` | `60000` | Minimum contour area passed to `PuzzleSolver`. |
 | `solver` | `threshold` | `none` | `0` - `255`, `none`, or `otsu`. Set to `none` or `otsu` to use Otsu thresholding. |
 | `solver` | `piece_margin` | `0.0` | Non-negative outward margin added to each detected piece polygon when the `PuzzlePiece` is created. The buffered outline becomes the actual shape used for edge analysis and solving. |
+| `solver` | `corner_simplify_frac` | `0.001` | Fraction of the piece perimeter used as polygon simplification tolerance during corner detection. Lower values keep more points; higher values simplify more aggressively. |
 
 For local testing without hardware, set `camera.transport = mock` and
 `microcontroller.transport = stub` in `config.ini`.

@@ -62,6 +62,7 @@ def build_puzzle_solver(config: AppConfig) -> PuzzleSolverPort:
         threshold_value=config.solver.threshold_value,
         variant=config.solver.algorithm,
         piece_margin=config.solver.piece_margin,
+        corner_simplify_frac=config.solver.corner_simplify_frac,
     )
 
 

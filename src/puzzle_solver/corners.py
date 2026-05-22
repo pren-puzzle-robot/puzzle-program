@@ -70,8 +70,8 @@ def _simplify_piece_polygon(
     min_corner_dist: float,
 ) -> ShapelyPolygon:
     perimeter = polygon.length
-    tolerance = max(perimeter * approx_frac, min_corner_dist * 0.25, 1.0)
-    
+    tolerance = max(perimeter * approx_frac, min_corner_dist * 0.1, 1.0)
+
     simplified = polygon.simplify(tolerance, preserve_topology=True)
     if simplified.is_empty:
         return polygon
@@ -141,7 +141,7 @@ def _prune_vertices(
 
 def detect_corners_for_piece(
     image_path: str,
-    approx_frac: float = 0.002,
+    approx_frac: float = 0.001,
     min_turn_deg: float = 30.0,
     min_corner_dist: int = 40,
 ) -> np.ndarray | None:
@@ -168,11 +168,11 @@ def detect_corners_for_piece(
     )
 
     vertices = np.asarray(polygon.exterior.coords[:-1], dtype=np.float64)
-    vertices = _prune_vertices(
-        vertices,
-        min_turn_deg=min_turn_deg,
-        min_corner_dist=float(min_corner_dist),
-    )
+    # vertices = _prune_vertices(
+    #     vertices,
+    #     min_turn_deg=min_turn_deg,
+    #     min_corner_dist=float(min_corner_dist),
+    # )
 
     if len(vertices) < 3:
         logger.warning("Corner detection produced fewer than 3 vertices for %s", image_path)
@@ -213,12 +213,23 @@ def _corners_to_pairs(corners: np.ndarray) -> list[tuple[int, int]]:
     return [(int(point[0][0]), int(point[0][1])) for point in corners][::-1]
 
 
-def detect_corners(images: list[str], out_path: str) -> list[tuple[str, list[tuple[int, int]]]]:
+def detect_corners(
+    images: list[str],
+    out_path: str,
+    approx_frac: float = 0.001,
+    min_turn_deg: float = 20.0,
+    min_corner_dist: int = 15,
+) -> list[tuple[str, list[tuple[int, int]]]]:
     corners_per_piece: list[tuple[str, list[tuple[int, int]]]] = []
     for image_path in images:
         filename = os.path.basename(image_path)
         name, ext = os.path.splitext(filename)
-        corners = detect_corners_for_piece(image_path)
+        corners = detect_corners_for_piece(
+            image_path,
+            approx_frac=approx_frac,
+            min_turn_deg=min_turn_deg,
+            min_corner_dist=min_corner_dist,
+        )
 
         output_image = os.path.join(out_path, f"{name}_corners{ext}")
         print_debug_image(image_path, corners, output_image)
@@ -238,7 +249,7 @@ if __name__ == "__main__":
     src_folder = sys.argv[1] if len(sys.argv) >= 2 else "../output"
     output_json = os.path.join(src_folder, "corners.json")
 
-    approx_frac = 0.002   # bigger = more simplification
+    approx_frac = 0.001   # bigger = more simplification
     min_turn_deg = 30.0   # bigger = fewer corners, only sharp ones
 
     logging.basicConfig(

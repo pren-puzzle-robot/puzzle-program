@@ -32,6 +32,7 @@ class PuzzleSolver:
         min_area: int | str = 60000,
         threshold_value: int | str | None = 140,
         piece_margin: float | str = 0.0,
+        corner_simplify_frac: float | str = 0.001,
     ) -> None:
         self.output_dir = (
             Path(output_dir) if output_dir is not None else Path(__file__).with_name("output")
@@ -40,18 +41,26 @@ class PuzzleSolver:
         self.min_area = min_area
         self.threshold_value = threshold_value
         self.piece_margin = self._validate_piece_margin(piece_margin)
+        self.corner_simplify_frac = self._validate_non_negative_float(
+            corner_simplify_frac,
+            "corner_simplify_frac",
+        )
 
     @staticmethod
-    def _validate_piece_margin(value: float | str) -> float:
+    def _validate_non_negative_float(value: float | str, name: str) -> float:
         try:
-            margin = float(value)
+            parsed = float(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError("piece_margin must be a number") from exc
+            raise ValueError(f"{name} must be a number") from exc
 
-        if margin < 0.0:
-            raise ValueError("piece_margin must be non-negative")
+        if parsed < 0.0:
+            raise ValueError(f"{name} must be non-negative")
 
-        return margin
+        return parsed
+
+    @classmethod
+    def _validate_piece_margin(cls, value: float | str) -> float:
+        return cls._validate_non_negative_float(value, "piece_margin")
 
     def _prepare_output_dir(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +223,11 @@ class PuzzleSolver:
         if len(piece_images) != 4 and len(piece_images) != 6:
             raise ValueError(f"Unexpected number of piece images: {len(piece_images)}")
 
-        corners = detect_corners(piece_images, str(self.output_dir))
+        corners = detect_corners(
+            piece_images,
+            str(self.output_dir),
+            approx_frac=self.corner_simplify_frac,
+        )
         logger.info("Detected corners for %d pieces", len(corners))
 
         puzzle_pieces = self._build_puzzle_pieces(corners)

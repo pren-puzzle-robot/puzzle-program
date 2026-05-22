@@ -35,23 +35,20 @@ def _edges_from_polygon(poly: Polygon) -> List[Edge]:
 
 
 def analyze_polygon(poly: Polygon) -> List[OuterEdge]:
-    """
-    Find all candidate outer-edge options for a piece.
-
-    - Corner piece -> each option is an OuterEdge with two Edges (corner).
-    - Edge piece   -> each option is an OuterEdge with one Edge.
-    """
     edges = _edges_from_polygon(poly)
     if not edges:
         return []
 
-    # keep only edges that can face the outside (all points on same side as centroid and not multiple on same straight)
     outer_candidates = [
         e for e in edges
         if _edge_can_be_outer(e, poly)
     ]
 
-    outer_candidates = _remove_lines_with_multiple_edges(outer_candidates)
+    outer_candidates = _remove_edges_with_vertices_in_edge_cones(
+        edges=outer_candidates,
+        vertices=list(poly.vertices),
+        cone_half_angle_deg=20.0,
+    )
 
     if not outer_candidates:
         return []
@@ -60,10 +57,11 @@ def analyze_polygon(poly: Polygon) -> List[OuterEdge]:
     combos = _contiguous_edge_combos(chains)
 
     outer_edges: List[OuterEdge] = [OuterEdge(edges=c) for c in combos if c]
-    outer_edges = sorted(outer_edges, key=lambda oe: -oe.length)
 
-    return outer_edges
+    perimeter = poly.perimeter()
+    outer_edges = [oe for oe in outer_edges if oe.length >= 0.1 * perimeter]
 
+    return sorted(outer_edges, key=lambda oe: -oe.length)
 
 
 def _edge_can_be_outer(edge: Edge, poly: Polygon, relative_tolerance: float = 1e-1) -> bool:
@@ -99,54 +97,103 @@ def _edge_can_be_outer(edge: Edge, poly: Polygon, relative_tolerance: float = 1e
 
     return True
 
-def _remove_lines_with_multiple_edges(edges: List[Edge]) -> List[Edge]:
-    n = len(edges)
-    to_remove = set()  # indices of edges to drop
 
-    for i in range(n):
-        if i in to_remove:
-            continue
-        for j in range(i + 1, n):
-            if j in to_remove:
+def _remove_edges_with_vertices_in_edge_cones(
+    edges: List[Edge],
+    vertices: List[Point],
+    cone_half_angle_deg: float = 20.0,
+) -> List[Edge]:
+    vertex_count = len(vertices)
+
+    if vertex_count <= 3 or not edges:
+        return edges
+
+    to_remove = set()
+
+    for edge_index, edge in enumerate(edges):
+        # Edge is a -> b, where:
+        # edge.i = index of a in the original polygon
+        # edge.j = index of b in the original polygon
+        ignored_vertex_indices = {
+            (edge.i - 1) % vertex_count,  # vertex before a
+            edge.i,                       # a
+            edge.j,                       # b
+            (edge.j + 1) % vertex_count,  # vertex after b
+        }
+
+        for vertex_index, vertex in enumerate(vertices):
+            if vertex_index in ignored_vertex_indices:
                 continue
-            if _are_collinear(edges[i], edges[j]):
-                # a second edge on same line => mark both and any others we find
-                to_remove.add(i)
-                to_remove.add(j)
 
-    return [e for idx, e in enumerate(edges) if idx not in to_remove]
+            if _is_point_inside_edge_end_cones(
+                edge=edge,
+                point=vertex,
+                cone_half_angle_deg=cone_half_angle_deg,
+            ):
+                to_remove.add(edge_index)
+                break
+
+    return [
+        edge
+        for edge_index, edge in enumerate(edges)
+        if edge_index not in to_remove
+    ]
 
 
-def _are_collinear(e1: Edge, e2: Edge,
-                   angle_epsilon: float = 1e-3, # 0 => exactly parallel, 1 => not very parallel
-                   distance_epsilon_percentage: float = 10) -> bool:
-    p1, p2 = e1.p1, e1.p2
-    q1, q2 = e2.p1, e2.p2
+def _is_point_inside_edge_end_cones(
+    edge: Edge,
+    point,
+    cone_half_angle_deg: float,
+) -> bool:
+    a = np.array((edge.p1.x, edge.p1.y), dtype=np.float64)
+    b = np.array((edge.p2.x, edge.p2.y), dtype=np.float64)
 
-    a = np.array((p2.x, p2.y)) - np.array((p1.x, p1.y))  # dir of e1
-    b = np.array((q2.x, q2.y)) - np.array((q1.x, q1.y))  # dir of e2
+    edge_vec = b - a
 
-    na = np.linalg.norm(a)
-    nb = np.linalg.norm(b)
-    if na < 1e-9 or nb < 1e-9:
-        # degenerate segment(s)
+    if np.linalg.norm(edge_vec) < 1e-9:
         return False
 
-    # 1) Check they are parallel (same or opposite direction)
-    dot = np.dot(a, b) / (na * nb)   # cos(angle)
-    if abs(abs(dot) - 1.0) > angle_epsilon:
+    # Cone from b forwards
+    in_forward_cone = _is_point_inside_cone(
+        apex=b,
+        axis=edge_vec,
+        point=point,
+        cone_half_angle_deg=cone_half_angle_deg,
+    )
+
+    # Cone from a backwards
+    in_backward_cone = _is_point_inside_cone(
+        apex=a,
+        axis=-edge_vec,
+        point=point,
+        cone_half_angle_deg=cone_half_angle_deg,
+    )
+
+    return in_forward_cone or in_backward_cone
+
+
+def _is_point_inside_cone(
+    apex: np.ndarray,
+    axis: np.ndarray,
+    point,
+    cone_half_angle_deg: float,
+) -> bool:
+    p = np.array((point.x, point.y), dtype=np.float64)
+
+    point_vec = p - apex
+
+    axis_len = np.linalg.norm(axis)
+    point_len = np.linalg.norm(point_vec)
+
+    if axis_len < 1e-9 or point_len < 1e-9:
         return False
 
-    distance_epsilon = (e1.length + e2.length) / 2.0 / distance_epsilon_percentage
+    cos_angle = np.dot(axis, point_vec) / (axis_len * point_len)
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
 
-    # 2) Check they lie on the same line:
-    # distance from q1 to the line through p1–p2
-    v = np.array((q1.x, q1.y)) - np.array((p1.x, p1.y))
-    cross = a[0] * v[1] - a[1] * v[0]          # 2D "z-component" of cross product
-    distance = abs(cross) / na                 # perpendicular distance
+    angle_deg = np.rad2deg(np.arccos(cos_angle))
 
-    return distance < distance_epsilon
-
+    return angle_deg <= cone_half_angle_deg
 
 
 

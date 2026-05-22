@@ -71,6 +71,7 @@ class SolverConfig:
     min_area: int
     threshold_value: str | None
     piece_margin: float
+    corner_simplify_frac: float
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
                 "min_area": "60000",
                 "threshold": "none",
                 "piece_margin": "0.0",
+                "corner_simplify_frac": "0.001",
             },
         }
     )
@@ -218,6 +220,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             piece_margin=_non_negative_float(
                 parser.get("solver", "piece_margin"),
                 "solver.piece_margin",
+            ),
+            corner_simplify_frac=_non_negative_float(
+                parser.get("solver", "corner_simplify_frac"),
+                "solver.corner_simplify_frac",
             ),
         ),
     )
