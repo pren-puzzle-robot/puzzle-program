@@ -18,6 +18,7 @@ from .greedy import Greedy
 from .match import Match
 from .pull_pieces import pull_pieces
 from .utilities import Solver, print_whole_puzzle_image
+from .edge_walk import EdgeWalk
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,9 @@ class PuzzleSolver:
 
         if self.variant == "greedy":
             return Greedy(puzzle_pieces)
+
+        if self.variant in {"edge_walk", "edge-walk"}:
+            return EdgeWalk()
 
         return Match()
 

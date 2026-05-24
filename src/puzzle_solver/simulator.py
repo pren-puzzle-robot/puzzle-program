@@ -12,6 +12,8 @@ from .utilities.draw_puzzle_piece import print_whole_puzzle_image
 from .utilities import Solver
 from .match import Match
 from .greedy import Greedy
+from .brute_force import BruteForce
+from .edge_walk import EdgeWalk
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ def main():
         "--variant",
         required=False,
         default="fast",
-        help="variant of algorithm to be used (e.i. fast or greedy)",
+        help="variant of algorithm to be used (fast, greedy, brute_force, edge_walk)",
     )
     ap.add_argument(
         "--min_area",
@@ -73,6 +75,10 @@ def main():
         solver = Match()
     elif args.variant == "greedy":
         solver = Greedy(puzzle_pieces)
+    elif args.variant in {"brute_force", "bruteforce", "brute"}:
+        solver = BruteForce()
+    elif args.variant in {"edge_walk", "edge-walk"}:
+        solver = EdgeWalk()
     else:
         solver = Match()
 
