@@ -90,7 +90,7 @@ class _Layout:
 class CornerWalk(Solver):
     """Place detected corner pieces on an A5-ratio frame and score by overlap."""
 
-    TARGET_ASPECT_RATIO = 1.0 / math.sqrt(2.0)
+    TARGET_ASPECT_RATIO = 1.0 / 1.4696969696969 # nicht A5 Seitenverhältnis math.sqrt(2)
 
     MAX_CORNER_CANDIDATES_PER_PIECE = 12
     MAX_EDGE_CANDIDATES_PER_PIECE = 16

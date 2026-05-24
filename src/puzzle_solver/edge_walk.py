@@ -73,8 +73,8 @@ class _Placement:
 class EdgeWalk(Solver):
     """Backtracking solver based on frame edge walking."""
 
-    TARGET_ASPECT_RATIO = 1.0 / math.sqrt(2.0)
-    FRAME_AREA_MULTIPLIER = 1.0
+    TARGET_ASPECT_RATIO = 1.0 / 1.484 # nicht A5 Seitenverhältnis math.sqrt(2)
+    FRAME_AREA_MULTIPLIER = 1.2
     MAX_CANDIDATES_PER_PIECE = 24
     MAX_COMBINATIONS_PER_TIER = 120_000
 
