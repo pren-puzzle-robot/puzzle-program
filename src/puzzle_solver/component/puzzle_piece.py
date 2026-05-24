@@ -24,6 +24,7 @@ class PuzzlePiece:
     """
 
     _polygon: Polygon
+    _polygon_before_expansion: Polygon | None
     _possible_possible_outer_edges: List[OuterEdge]
     _outer_edge: OuterEdge
 
@@ -37,8 +38,11 @@ class PuzzlePiece:
         if margin < 0.0:
             raise ValueError("PuzzlePiece margin must be non-negative")
 
+        self._rotation = 0.0
         self._translation: tuple[float, float] = (0.0, 0.0)
+        self._polygon_before_expansion = None
         if margin > 0.0:
+            self._polygon_before_expansion = Polygon(points_list)
             points_list = self._expand_points(points_list, margin)
         self._polygon = Polygon(points_list)
 
@@ -189,9 +193,12 @@ class PuzzlePiece:
         """Rotate the puzzle piece polygon by the given angle in radians."""
         self._rotation += angle_rad
 
-        self._polygon.rotate(angle_rad)
+        origin = self.polygon.centroid()
+        self._polygon.rotate(angle_rad, origin)
+        if self._polygon_before_expansion is not None:
+            self._polygon_before_expansion.rotate(angle_rad, origin)
         for edge in self._possible_outer_edges:
-            edge.rotate(angle_rad, self.polygon.centroid())
+            edge.rotate(angle_rad, origin)
 
     def translate(self, from_point: Point, to_point: Point) -> None:
         """Translate the puzzle piece so that from_point moves to to_point."""
@@ -202,6 +209,8 @@ class PuzzlePiece:
         logger.debug("Translation: %s", self._translation)
 
         self._polygon.translate(dx, dy)
+        if self._polygon_before_expansion is not None:
+            self._polygon_before_expansion.translate(dx, dy)
         self._possible_outer_edges = [
             edge.translated(dx, dy) for edge in self._possible_outer_edges
         ]
@@ -210,6 +219,10 @@ class PuzzlePiece:
     @property
     def polygon(self) -> Polygon:
         return self._polygon
+
+    @property
+    def polygon_before_expansion(self) -> Polygon | None:
+        return self._polygon_before_expansion
 
     @property
     def type(self) -> PieceType:

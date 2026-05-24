@@ -214,6 +214,9 @@ def print_whole_puzzle_image(pieces: dict[int, PuzzlePiece]) -> Image.Image:
         # Filled polygon with colored border
         draw.polygon([(p.x, p.y) for p in piece.polygon.vertices], fill=fill, outline=outline)
 
+        if (piece.polygon_before_expansion is not None):
+            draw.polygon([(p.x, p.y) for p in piece.polygon_before_expansion.vertices], fill=None, outline=outline)
+
         cx, cy = piece.polygon.centroid().x, piece.polygon.centroid().y
         r = 5
         draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(0, 0, 0, 255))
