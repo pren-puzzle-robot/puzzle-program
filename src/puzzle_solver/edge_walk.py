@@ -1,7 +1,7 @@
 """Edge-walking solver strategy.
 
-The solver searches placements by walking a cursor around an A5-sized frame
-and recursively trying straight candidate edges from each piece.
+The solver searches placements by walking a cursor around an A5-style frame and
+recursively trying straight candidate edges from each piece.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points
 
+from .brute_force import BruteForce
 from .component import OuterEdge, Point, PuzzlePiece
 from .utilities import Solver
 
@@ -73,15 +74,14 @@ class EdgeWalk(Solver):
     """Backtracking solver based on frame edge walking."""
 
     TARGET_ASPECT_RATIO = 1.0 / math.sqrt(2.0)
-    FRAME_AREA_MULTIPLIERS = (1.0, 1.1, 1.2, 1.4, 1.8)
+    FRAME_AREA_MULTIPLIER = 1.0
     MAX_CANDIDATES_PER_PIECE = 24
     MAX_COMBINATIONS_PER_TIER = 120_000
 
     STRAIGHT_EDGE_TOLERANCE = math.radians(8.0)
     PLACED_EDGE_ANGLE_MARGIN = math.radians(5.0)
-    MAX_PIECE_OVERLAP_PERCENTAGE = 2.0
-    INITIAL_FRAME_OVERFLOW_PERCENTAGE_MARGIN = 3.0
-    FINAL_FRAME_OVERFLOW_PERCENTAGE_MARGIN = 0.25
+    OVERLAP_PERCENTAGE_MARGIN = 3.0
+    FINAL_PERCENTAGE_MARGIN = 0.25
     SETTLE_ITERATIONS = 20
     RELAX_ITERATIONS = 10
     RELAX_STEP = 0.5
@@ -90,7 +90,6 @@ class EdgeWalk(Solver):
 
     def __init__(self) -> None:
         self._solution: tuple[_Placement, ...] | None = None
-        self._solution_overlap_score: tuple[float, float, float] | None = None
         self._combinations_tried = 0
 
     @classmethod
@@ -102,55 +101,54 @@ class EdgeWalk(Solver):
         if not puzzle:
             return []
 
+        frame = self._derive_frame(puzzle.values())
         candidates_by_piece = {
             piece_id: self._build_candidates(piece_id, piece)
             for piece_id, piece in puzzle.items()
         }
 
-        for frame_area_multiplier in self.FRAME_AREA_MULTIPLIERS:
-            frame = self._derive_frame(puzzle.values(), frame_area_multiplier)
-            for min_edge_tier in (3, 2, 1):
-                self._solution = None
-                self._solution_overlap_score = None
-                self._combinations_tried = 0
-                logger.info(
-                    "Trying edge-walk solver with frame multiplier %.2f "
-                    "and minimum edge tier %d",
-                    frame_area_multiplier,
-                    min_edge_tier,
-                )
+        for min_edge_tier in (3, 2, 1):
+            self._solution = None
+            self._combinations_tried = 0
+            logger.info("Trying edge-walk solver with minimum edge tier %d", min_edge_tier)
 
-                for cursor in self._start_cursors(frame):
-                    for piece_id in sorted(puzzle):
-                        for candidate in candidates_by_piece[piece_id]:
-                            if candidate.tier < min_edge_tier:
-                                continue
-                            self._place_next(
-                                puzzle=puzzle,
-                                candidates_by_piece=candidates_by_piece,
-                                frame=frame,
-                                placements=(),
-                                remaining_piece_ids=frozenset(puzzle),
-                                cursor=cursor,
-                                piece_id=piece_id,
-                                candidate=candidate,
-                                min_edge_tier=min_edge_tier,
-                            )
-
-                logger.info(
-                    "Edge-walk solver tried %d combinations with frame multiplier %.2f "
-                    "and minimum edge tier %d",
-                    self._combinations_tried,
-                    frame_area_multiplier,
-                    min_edge_tier,
-                )
+            for cursor in self._start_cursors(frame):
+                for piece_id in sorted(puzzle):
+                    for candidate in candidates_by_piece[piece_id]:
+                        if candidate.tier < min_edge_tier:
+                            continue
+                        self._place_next(
+                            puzzle=puzzle,
+                            candidates_by_piece=candidates_by_piece,
+                            frame=frame,
+                            placements=(),
+                            remaining_piece_ids=frozenset(puzzle),
+                            cursor=cursor,
+                            piece_id=piece_id,
+                            candidate=candidate,
+                            min_edge_tier=min_edge_tier,
+                        )
+                        if self._solution is not None:
+                            break
+                    if self._solution is not None:
+                        break
                 if self._solution is not None:
-                    self._apply_solution(puzzle, self._solution)
-                    return [placement.piece_id for placement in self._solution]
+                    break
 
-        raise RuntimeError(
-            "Edge-walk solver could not place all pieces without overlap"
+            logger.info(
+                "Edge-walk solver tried %d combinations at minimum edge tier %d",
+                self._combinations_tried,
+                min_edge_tier,
+            )
+            if self._solution is not None:
+                self._apply_solution(puzzle, self._solution)
+                return [placement.piece_id for placement in self._solution]
+
+        logger.warning(
+            "Edge-walk solver could not place all pieces in the frame; "
+            "falling back to brute_force"
         )
+        return BruteForce.solve(puzzle)
 
     def _place_next(
         self,
@@ -164,6 +162,8 @@ class EdgeWalk(Solver):
         candidate: _EdgeCandidate,
         min_edge_tier: int,
     ) -> None:
+        if self._solution is not None:
+            return
         if self._combinations_tried >= self.MAX_COMBINATIONS_PER_TIER:
             return
 
@@ -182,7 +182,7 @@ class EdgeWalk(Solver):
         if not next_remaining_piece_ids:
             relaxed = self._relax(next_placements, frame)
             if self._all_placements_valid(relaxed, frame):
-                self._record_solution(relaxed)
+                self._solution = relaxed
             return
 
         cursor = _Cursor(placement.placed_points[-1], cursor.heading, False)
@@ -207,7 +207,9 @@ class EdgeWalk(Solver):
                         next_piece_id,
                         next_candidate,
                         min_edge_tier,
-            )
+                    )
+                    if self._solution is not None:
+                        return
                 if self._edge_fits_in_frame(next_candidate, cursor, frame):
                     self._place_next(
                         puzzle,
@@ -220,21 +222,19 @@ class EdgeWalk(Solver):
                         next_candidate,
                         min_edge_tier,
                     )
+                    if self._solution is not None:
+                        return
 
-    def _derive_frame(
-        self,
-        pieces: Iterable[PuzzlePiece],
-        frame_area_multiplier: float,
-    ) -> _Frame:
+    def _derive_frame(self, pieces: Iterable[PuzzlePiece]) -> _Frame:
         piece_area = sum(piece.polygon.area() for piece in pieces)
-        target_area = max(piece_area * frame_area_multiplier, 1.0)
+        target_area = max(piece_area * self.FRAME_AREA_MULTIPLIER, 1.0)
         long_side = math.sqrt(target_area / self.TARGET_ASPECT_RATIO)
         short_side = target_area / long_side
         width = long_side
         height = short_side
-        piece_gap = 0.0
-        edge_gap = max(8.0, min(width, height) * 0.012)
-        turn_margin = max(edge_gap * 3.0, min(width, height) * 0.08)
+        piece_gap = max(8.0, min(width, height) * 0.018)
+        edge_gap = max(piece_gap * 0.75, min(width, height) * 0.012)
+        turn_margin = max(piece_gap * 3.0, min(width, height) * 0.08)
         overflow = max(edge_gap, min(width, height) * 0.015)
 
         return _Frame(
@@ -278,14 +278,13 @@ class EdgeWalk(Solver):
             length = self._path_length(points)
             if length <= 0.0:
                 continue
-            first_angle = self._angle(points[0], points[1])
             raw_candidates.append(
                 (
                     outer_edge_index,
                     outer_edge_reversed,
                     points,
                     length,
-                    first_angle,
+                    self._angle(points[0], points[1]),
                 )
             )
 
@@ -466,10 +465,8 @@ class EdgeWalk(Solver):
         frame: _Frame,
     ) -> bool:
         return (
-            self._overflow_percentage(placement, frame)
-            > self.INITIAL_FRAME_OVERFLOW_PERCENTAGE_MARGIN
-            or self._overlap_percentage(placement, placed)
-            > self.MAX_PIECE_OVERLAP_PERCENTAGE
+            self._overlap_percentage(placement, placed) > self.OVERLAP_PERCENTAGE_MARGIN
+            or self._overflow_percentage(placement, frame) > self.OVERLAP_PERCENTAGE_MARGIN
         )
 
     def _is_invalid_final_placement(
@@ -479,10 +476,8 @@ class EdgeWalk(Solver):
         frame: _Frame,
     ) -> bool:
         return (
-            self._overflow_percentage(placement, frame)
-            > self.FINAL_FRAME_OVERFLOW_PERCENTAGE_MARGIN
-            or self._overlap_percentage(placement, placed)
-            > self.MAX_PIECE_OVERLAP_PERCENTAGE
+            self._overlap_percentage(placement, placed) > self.FINAL_PERCENTAGE_MARGIN
+            or self._overflow_percentage(placement, frame) > self.FINAL_PERCENTAGE_MARGIN
         )
 
     def _all_placements_valid(
@@ -495,21 +490,6 @@ class EdgeWalk(Solver):
             if self._is_invalid_final_placement(placement, others, frame):
                 return False
         return True
-
-    def _record_solution(self, placements: tuple[_Placement, ...]) -> None:
-        score = self._overlap_score(placements)
-        if score[0] > self.MAX_PIECE_OVERLAP_PERCENTAGE:
-            return
-        if self._solution_overlap_score is None or score < self._solution_overlap_score:
-            self._solution = placements
-            self._solution_overlap_score = score
-            logger.debug(
-                "Edge-walk solver retained solution with max overlap %.3f%% "
-                "closure overlap %.3f%% and total overlap %.3f%%",
-                score[0],
-                score[1],
-                score[2],
-            )
 
     def _settle_new_placement(
         self,
@@ -549,13 +529,13 @@ class EdgeWalk(Solver):
 
             for first_index in range(len(mutable)):
                 for second_index in range(first_index + 1, len(mutable)):
-                    move = self._separation_vector(
+                    dx, dy = self._push_vector(
                         mutable[first_index].polygon,
                         mutable[second_index].polygon,
                         frame.piece_gap,
                     )
-                    moves[first_index] += move * 0.5
-                    moves[second_index] -= move * 0.5
+                    moves[first_index] += np.array([dx, dy]) * 0.5
+                    moves[second_index] += np.array([-dx, -dy]) * 0.5
 
             for index, placement in enumerate(mutable):
                 dx, dy = self._frame_push_vector(
@@ -605,7 +585,7 @@ class EdgeWalk(Solver):
                 if aligned_heading is None:
                     continue
 
-                if current.point.get_distance_between(edge_start) <= max(1.0, frame.edge_gap):
+                if current.point.get_distance_between(edge_start) <= frame.piece_gap * 3.0:
                     moved = _Cursor(edge_end, aligned_heading, current.angled_placement)
                     return self._move_cursor_along_placed_edges(
                         moved,
@@ -732,55 +712,6 @@ class EdgeWalk(Solver):
                 continue
             overlap_area += float(placement.polygon.intersection(other.polygon).area)
         return overlap_area * 100.0 / placement.area
-
-    @staticmethod
-    def _overlap_score(
-        placements: tuple[_Placement, ...],
-    ) -> tuple[float, float, float]:
-        max_overlap = 0.0
-        total_overlap = 0.0
-
-        for first_index, first in enumerate(placements):
-            for second in placements[first_index + 1 :]:
-                if not EdgeWalk._bounds_overlap(first.bounds, second.bounds):
-                    continue
-                overlap_area = float(first.polygon.intersection(second.polygon).area)
-                if overlap_area <= 0.0:
-                    continue
-
-                first_percentage = (
-                    overlap_area * 100.0 / first.area if first.area > 0.0 else 100.0
-                )
-                second_percentage = (
-                    overlap_area * 100.0 / second.area if second.area > 0.0 else 100.0
-                )
-                pair_overlap = max(first_percentage, second_percentage)
-                max_overlap = max(max_overlap, pair_overlap)
-                total_overlap += first_percentage + second_percentage
-
-        closure_overlap = (
-            EdgeWalk._pair_overlap_percentage(placements[-1], placements[0])
-            if len(placements) >= 2
-            else 0.0
-        )
-        return max_overlap, closure_overlap, total_overlap
-
-    @staticmethod
-    def _pair_overlap_percentage(
-        first: _Placement,
-        second: _Placement,
-    ) -> float:
-        if not EdgeWalk._bounds_overlap(first.bounds, second.bounds):
-            return 0.0
-        overlap_area = float(first.polygon.intersection(second.polygon).area)
-        if overlap_area <= 0.0:
-            return 0.0
-
-        first_percentage = overlap_area * 100.0 / first.area if first.area > 0.0 else 100.0
-        second_percentage = (
-            overlap_area * 100.0 / second.area if second.area > 0.0 else 100.0
-        )
-        return max(first_percentage, second_percentage)
 
     @staticmethod
     def _overflow_percentage(

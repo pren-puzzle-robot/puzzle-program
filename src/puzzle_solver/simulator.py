@@ -14,6 +14,7 @@ from .match import Match
 from .greedy import Greedy
 from .brute_force import BruteForce
 from .edge_walk import EdgeWalk
+from .corner_walk import CornerWalk
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def main():
         "--variant",
         required=False,
         default="fast",
-        help="variant of algorithm to be used (fast, greedy, brute_force, edge_walk)",
+        help="variant of algorithm to be used (fast, greedy, brute_force, edge_walk, corner_walk)",
     )
     ap.add_argument(
         "--min_area",
@@ -79,6 +80,8 @@ def main():
         solver = BruteForce()
     elif args.variant in {"edge_walk", "edge-walk"}:
         solver = EdgeWalk()
+    elif args.variant in {"corner_walk", "corner-walk"}:
+        solver = CornerWalk()
     else:
         solver = Match()
 

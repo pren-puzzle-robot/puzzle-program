@@ -13,6 +13,7 @@ from puzzle_solver.utilities.draw_puzzle_piece import render_puzzle_piece
 
 from .brute_force import BruteForce
 from .component import PuzzlePiece, Point
+from .corner_walk import CornerWalk
 from .corners import detect_corners
 from .greedy import Greedy
 from .match import Match
@@ -92,6 +93,9 @@ class PuzzleSolver:
 
         if self.variant in {"edge_walk", "edge-walk"}:
             return EdgeWalk()
+
+        if self.variant in {"corner_walk", "corner-walk"}:
+            return CornerWalk()
 
         return Match()
 
