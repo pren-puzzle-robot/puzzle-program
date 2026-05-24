@@ -17,22 +17,6 @@ from shapely.geometry.polygon import orient
 logger = logging.getLogger(__name__)
 
 
-def _turn_angle_deg(prev_point: np.ndarray, point: np.ndarray, next_point: np.ndarray) -> float:
-    incoming = prev_point - point
-    outgoing = next_point - point
-
-    if np.allclose(incoming, 0) or np.allclose(outgoing, 0):
-        return 0.0
-
-    denom = np.linalg.norm(incoming) * np.linalg.norm(outgoing)
-    if denom <= 1e-9:
-        return 0.0
-
-    cosine = np.clip(float(np.dot(incoming, outgoing) / denom), -1.0, 1.0)
-    interior = degrees(acos(cosine))
-    return 180.0 - interior
-
-
 def _largest_piece_contour(binary_image: np.ndarray) -> np.ndarray | None:
     contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
@@ -88,51 +72,96 @@ def _simplify_piece_polygon(
     return orient(simplified, sign=1.0)
 
 
-def _prune_vertices(
+def _angle_between_vectors_deg(first: np.ndarray, second: np.ndarray) -> float | None:
+    first_len = np.linalg.norm(first)
+    second_len = np.linalg.norm(second)
+    if first_len <= 1e-9 or second_len <= 1e-9:
+        return None
+
+    cosine = np.clip(float(np.dot(first, second) / (first_len * second_len)), -1.0, 1.0)
+    return degrees(acos(cosine))
+
+
+def _cross_2d(first: np.ndarray, second: np.ndarray) -> float:
+    return float(first[0] * second[1] - first[1] * second[0])
+
+
+def _line_intersection(
+    point: np.ndarray,
+    direction: np.ndarray,
+    other_point: np.ndarray,
+    other_direction: np.ndarray,
+) -> np.ndarray | None:
+    denominator = _cross_2d(direction, other_direction)
+    if abs(denominator) <= 1e-9:
+        return None
+
+    scale = _cross_2d(other_point - point, other_direction) / denominator
+    return point + direction * scale
+
+
+def _replace_bridge_with_corner(
     vertices: np.ndarray,
-    min_turn_deg: float,
-    min_corner_dist: float,
+    start_index: int,
+    corner: np.ndarray,
+) -> np.ndarray:
+    result = [vertices[start_index], corner]
+    current_index = (start_index + 3) % len(vertices)
+    while current_index != start_index:
+        result.append(vertices[current_index])
+        current_index = (current_index + 1) % len(vertices)
+
+    return np.asarray(result, dtype=np.float64)
+
+
+def _polygon_perimeter(vertices: np.ndarray) -> float:
+    shifted_vertices = np.roll(vertices, -1, axis=0)
+    return float(np.sum(np.linalg.norm(shifted_vertices - vertices, axis=1)))
+
+
+def _prune_right_angle_bridges(
+    vertices: np.ndarray,
+    right_angle_tolerance_deg: float,
+    close_fraction: float = 0.05,
+    min_polygon_fraction: float = 0.30,
 ) -> np.ndarray:
     if len(vertices) <= 3:
         return vertices
 
-    filtered: list[np.ndarray] = []
-    for index, point in enumerate(vertices):
-        prev_point = vertices[(index - 1) % len(vertices)]
-        next_point = vertices[(index + 1) % len(vertices)]
-
-        prev_len = np.linalg.norm(point - prev_point)
-        next_len = np.linalg.norm(next_point - point)
-        turn_angle = _turn_angle_deg(prev_point, point, next_point)
-
-        if prev_len < min_corner_dist * 0.5 and next_len < min_corner_dist * 0.5:
-            continue
-        if turn_angle < min_turn_deg and min(prev_len, next_len) < min_corner_dist:
-            continue
-
-        filtered.append(point)
-
-    if len(filtered) < 3:
-        return vertices
-
-    filtered_array = np.asarray(filtered, dtype=np.float64)
-
+    filtered_array = np.asarray(vertices, dtype=np.float64)
     changed = True
     while changed and len(filtered_array) > 3:
         changed = False
+        polygon_perimeter = _polygon_perimeter(filtered_array)
         for index in range(len(filtered_array)):
-            point = filtered_array[index]
-            next_point = filtered_array[(index + 1) % len(filtered_array)]
-            if np.linalg.norm(next_point - point) >= min_corner_dist:
+            a = filtered_array[index]
+            b = filtered_array[(index + 1) % len(filtered_array)]
+            c = filtered_array[(index + 2) % len(filtered_array)]
+            d = filtered_array[(index + 3) % len(filtered_array)]
+
+            ab = b - a
+            cd = d - c
+            ab_len = np.linalg.norm(ab)
+            cd_len = np.linalg.norm(cd)
+            if ab_len <= 1e-9 or cd_len <= 1e-9:
                 continue
 
-            prev_point = filtered_array[(index - 1) % len(filtered_array)]
-            after_next = filtered_array[(index + 2) % len(filtered_array)]
-            current_turn = _turn_angle_deg(prev_point, point, next_point)
-            next_turn = _turn_angle_deg(point, next_point, after_next)
+            bridge_length = ab_len + np.linalg.norm(c - b) + cd_len
+            if bridge_length < min_polygon_fraction * polygon_perimeter:
+                continue
 
-            drop_index = index if current_turn <= next_turn else (index + 1) % len(filtered_array)
-            filtered_array = np.delete(filtered_array, drop_index, axis=0)
+            if np.linalg.norm(c - b) > close_fraction * (ab_len + cd_len):
+                continue
+
+            angle = _angle_between_vectors_deg(ab, cd)
+            if angle is None or abs(angle - 90.0) > right_angle_tolerance_deg:
+                continue
+
+            corner = _line_intersection(a, ab, c, cd)
+            if corner is None or not np.all(np.isfinite(corner)):
+                continue
+
+            filtered_array = _replace_bridge_with_corner(filtered_array, index, corner)
             changed = True
             break
 
@@ -142,7 +171,7 @@ def _prune_vertices(
 def detect_corners_for_piece(
     image_path: str,
     approx_frac: float = 0.001,
-    min_turn_deg: float = 30.0,
+    min_turn_deg: float = 10.0,
     min_corner_dist: int = 40,
 ) -> np.ndarray | None:
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -168,11 +197,10 @@ def detect_corners_for_piece(
     )
 
     vertices = np.asarray(polygon.exterior.coords[:-1], dtype=np.float64)
-    # vertices = _prune_vertices(
-    #     vertices,
-    #     min_turn_deg=min_turn_deg,
-    #     min_corner_dist=float(min_corner_dist),
-    # )
+    vertices = _prune_right_angle_bridges(
+        vertices,
+        right_angle_tolerance_deg=min_turn_deg,
+    )
 
     if len(vertices) < 3:
         logger.warning("Corner detection produced fewer than 3 vertices for %s", image_path)
@@ -217,7 +245,7 @@ def detect_corners(
     images: list[str],
     out_path: str,
     approx_frac: float = 0.001,
-    min_turn_deg: float = 20.0,
+    min_turn_deg: float = 10.0,
     min_corner_dist: int = 15,
 ) -> list[tuple[str, list[tuple[int, int]]]]:
     corners_per_piece: list[tuple[str, list[tuple[int, int]]]] = []
