@@ -4,6 +4,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -140,13 +141,13 @@ class SoundPlayer:
 
     @staticmethod
     def _play_path(sound_path: Path) -> None:
+        sound_path = sound_path.resolve()
+
+        if not sound_path.exists():
+            raise FileNotFoundError(sound_path)
+
         if sys.platform == "win32":
             import winsound
-
-            sound_path = sound_path.resolve()
-
-            if not sound_path.exists():
-                raise FileNotFoundError(sound_path)
 
             winsound.PlaySound(
                 str(sound_path),
@@ -154,15 +155,59 @@ class SoundPlayer:
             )
             return
 
-        for command in (("aplay",), ("paplay",), ("ffplay", "-nodisp", "-autoexit")):
+        errors: list[str] = []
+        timeout_seconds = SoundPlayer._playback_timeout_seconds(sound_path)
+
+        for command in (
+            ("aplay", "-q", "-D", "plughw:2,0"),
+            ("aplay", "-q"),
+            ("pw-play",),
+            ("paplay",),
+            ("ffplay", "-nodisp", "-autoexit", "-loglevel", "error"),
+        ):
             executable = shutil.which(command[0])
             if executable is None:
                 continue
-            subprocess.Popen(
-                [executable, *command[1:], str(sound_path)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return
+
+            try:
+                completed = subprocess.run(
+                    [executable, *command[1:], str(sound_path)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    errors="replace",
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                errors.append(
+                    f"{command[0]} timed out after {timeout_seconds:.1f} seconds"
+                )
+                continue
+
+            if completed.returncode == 0:
+                return
+
+            output = (completed.stderr or completed.stdout).strip()
+            if output:
+                errors.append(f"{command[0]} exited with {completed.returncode}: {output}")
+            else:
+                errors.append(f"{command[0]} exited with {completed.returncode}")
+
+        if errors:
+            raise RuntimeError("Audio playback failed: " + "; ".join(errors))
 
         raise RuntimeError("No supported audio playback command found")
+
+    @staticmethod
+    def _playback_timeout_seconds(sound_path: Path) -> float:
+        try:
+            with wave.open(str(sound_path), "rb") as sound_file:
+                frame_rate = sound_file.getframerate()
+                frame_count = sound_file.getnframes()
+                if frame_rate > 0:
+                    return max(5.0, min(30.0, (frame_count / frame_rate) + 2.0))
+        except (EOFError, OSError, wave.Error):
+            pass
+
+        return 10.0
