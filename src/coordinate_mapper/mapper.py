@@ -10,7 +10,7 @@ from puzzle_models import MachinePlacement, SolverPlacement
 
 logger = logging.getLogger(__name__)
 
-FULL_TURN_UNITS = 1600.0
+FULL_TURN_UNITS = 3200.0
 
 
 @dataclass(frozen=True)

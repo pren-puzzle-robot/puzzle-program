@@ -241,7 +241,7 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
         self._session.wait_for_event({START_COMMAND}, timeout_seconds=float("inf"))
 
         self.send_command(SimpleSendCommand.RESET)
-        self.send_move(x=20_000, y=19_000, rotation=0)
+        self.send_move(x=22_000, y=19_000, rotation=0)
         logger.info("Received start command '%s'", START_COMMAND.value)
 
     def send_path(self, machine_points: list[MachinePlacement]) -> str:
@@ -307,11 +307,14 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
             SimpleSendCommand.LOWER,
             SimpleSendCommand.HOLD_OFF,
             SimpleSendCommand.LIFT,
-            SimpleSendCommand.RESET,
+            # SimpleSendCommand.RESET,
         ):
             self._send_transport_command(command)
-            # ToDo: Remove wait
-            time.sleep(1.5)
+            # Sleep olny on Hold Off
+            if command is SimpleSendCommand.HOLD_OFF:
+                time.sleep(.7)
+            if command is SimpleSendCommand.HOLD_ON:
+                time.sleep(.3)
 
     def _send_transport_command(self, command: MoveCommand | SimpleSendCommand) -> None:
         if isinstance(command, MoveCommand):

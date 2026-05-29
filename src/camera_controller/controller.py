@@ -28,7 +28,7 @@ class CameraController:
         media_base_url: str = "http://10.5.5.9:8080",
         download_dir: str = "captures",
         calibration_file: str | None = None,
-        capture_delay_seconds: float = 7.5,
+        capture_delay_seconds: float = 4.5,
         request_timeout_seconds: float = 5.0,
     ) -> None:
         self.gopro_base_url = gopro_base_url.rstrip("/")
