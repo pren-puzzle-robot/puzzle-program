@@ -96,6 +96,7 @@ class CornerWalk(Solver):
     MAX_EDGE_CANDIDATES_PER_PIECE = 16
     MAX_CORNER_PLACEMENTS_PER_PIECE_AND_FRAME_CORNER = 8
     INSIDE_FRAME_AREA_TOLERANCE_RATIO = 1e-6
+    MAX_PAIR_OVERLAP_PERCENTAGE = 5.0
 
     @classmethod
     def solve(cls, puzzle: dict[int, PuzzlePiece]) -> list[int]:
@@ -341,14 +342,24 @@ class CornerWalk(Solver):
 
         for frame_corner in frame.corners:
             next_states: list[tuple[_Placement, ...]] = []
+            pruned_overlap_count = 0
             for placements in states:
                 used_piece_ids = {placement.piece_id for placement in placements}
                 for placement in corner_placements[frame_corner.name]:
                     if placement.piece_id in used_piece_ids:
                         continue
+                    if self._overlaps_too_much(placement, placements):
+                        pruned_overlap_count += 1
+                        continue
                     next_states.append(placements + (placement,))
 
             states = next_states
+            logger.debug(
+                "corner_walk retained %d states after %s, pruned %d excessive-overlap states",
+                len(states),
+                frame_corner.name,
+                pruned_overlap_count,
+            )
 
         for corner_layout in states:
             if len(puzzle) == 4:
@@ -415,6 +426,8 @@ class CornerWalk(Solver):
                 )
                 if first_placement is None:
                     continue
+                if self._overlaps_too_much(first_placement, corner_layout):
+                    continue
 
                 for second_candidate in edge_candidates_by_piece[second_piece_id]:
                     second_placement = self._place_edge_candidate(
@@ -429,6 +442,11 @@ class CornerWalk(Solver):
                         second_side,
                     )
                     if second_placement is None:
+                        continue
+                    if self._overlaps_too_much(
+                        second_placement,
+                        corner_layout + (first_placement,),
+                    ):
                         continue
 
                     yield corner_layout + (first_placement, second_placement)
@@ -651,6 +669,34 @@ class CornerWalk(Solver):
                     continue
                 overlap += float(first.polygon.intersection(second.polygon).area)
         return overlap
+
+    @classmethod
+    def _overlaps_too_much(
+        cls,
+        placement: _Placement,
+        placed: tuple[_Placement, ...],
+    ) -> bool:
+        return any(
+            cls._pair_overlap_percentage(placement, other)
+            > cls.MAX_PAIR_OVERLAP_PERCENTAGE
+            for other in placed
+        )
+
+    @staticmethod
+    def _pair_overlap_percentage(
+        first: _Placement,
+        second: _Placement,
+    ) -> float:
+        smaller_area = min(first.area, second.area)
+        if smaller_area <= 0.0:
+            return 100.0
+        if not CornerWalk._bounds_overlap(first.bounds, second.bounds):
+            return 0.0
+        return (
+            float(first.polygon.intersection(second.polygon).area)
+            * 100.0
+            / smaller_area
+        )
 
     @staticmethod
     def _overflow_area(placement: _Placement, frame: _Frame) -> float:

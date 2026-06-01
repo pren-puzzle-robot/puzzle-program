@@ -56,6 +56,8 @@ def analyze_polygon(poly: Polygon) -> List[OuterEdge]:
     chains = _build_edge_chains(outer_candidates)
     combos = _contiguous_edge_combos(chains)
 
+    combos = _remove_combos_not_right_angle(combos)
+
     outer_edges: List[OuterEdge] = [OuterEdge(edges=c) for c in combos if c]
 
     perimeter = poly.perimeter()
@@ -251,3 +253,61 @@ def _contiguous_edge_combos(chains: List[List[Edge]]) -> List[List[Edge]]:
                 combos.append(chain[start:end+1])
 
     return combos
+
+def _remove_combos_not_right_angle(
+    combos: List[List[Edge]],
+    angle_tolerance_deg: float = 3.0,
+) -> List[List[Edge]]:
+    """
+    Keep combos where the first vertex, last vertex, and at least one intermediate
+    vertex form a right angle.
+
+    Checks angle: first_vertex -> middle_vertex -> last_vertex
+    """
+    valid_combos: List[List[Edge]] = []
+
+    for combo in combos:
+        if len(combo) < 2:
+            valid_combos.append(combo)
+            continue
+
+        # Assuming combo is an ordered path:
+        # edge1.p1 -> edge1.p2 -> edge2.p2 -> edge3.p2 ...
+        vertices = [combo[0].p1] + [edge.p2 for edge in combo]
+
+        if len(vertices) < 3:
+            continue
+
+        first_vertex = vertices[0]
+        last_vertex = vertices[-1]
+        middle_vertices = vertices[1:-1]
+
+        first_point = np.array((first_vertex.x, first_vertex.y))
+        last_point = np.array((last_vertex.x, last_vertex.y))
+
+        found_right_angle = False
+
+        for middle_vertex in middle_vertices:
+            middle_point = np.array((middle_vertex.x, middle_vertex.y))
+
+            vec_to_first = first_point - middle_point
+            vec_to_last = last_point - middle_point
+
+            if np.linalg.norm(vec_to_first) < 1e-9 or np.linalg.norm(vec_to_last) < 1e-9:
+                continue
+
+            cos_angle = np.dot(vec_to_first, vec_to_last) / (
+                np.linalg.norm(vec_to_first) * np.linalg.norm(vec_to_last)
+            )
+            cos_angle = np.clip(cos_angle, -1.0, 1.0)
+
+            angle_deg = np.rad2deg(np.arccos(cos_angle))
+
+            if abs(angle_deg - 90.0) <= angle_tolerance_deg:
+                found_right_angle = True
+                break
+
+        if found_right_angle:
+            valid_combos.append(combo)
+
+    return valid_combos
