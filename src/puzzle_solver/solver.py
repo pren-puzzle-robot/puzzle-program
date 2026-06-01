@@ -96,7 +96,7 @@ class PuzzleSolver:
             return EdgeWalk()
 
         if self.variant in {"corner_walk", "corner-walk"}:
-            return CornerWalk()
+            return CornerWalk(debug_dir=self.output_dir)
 
         return Match()
 

@@ -6,8 +6,10 @@ from dataclasses import dataclass
 import itertools
 import logging
 import math
+from pathlib import Path
 from typing import Iterable
 
+from PIL import Image, ImageDraw, ImageFont
 from shapely.affinity import translate as translate_geometry
 from shapely.geometry import MultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
@@ -95,13 +97,25 @@ class CornerWalk(Solver):
     MAX_CORNER_CANDIDATES_PER_PIECE = 12
     MAX_EDGE_CANDIDATES_PER_PIECE = 16
     MAX_CORNER_PLACEMENTS_PER_PIECE_AND_FRAME_CORNER = 8
+    STRAIGHT_EDGE_TOLERANCE = math.radians(8.0)
     INSIDE_FRAME_AREA_TOLERANCE_RATIO = 1e-6
+    CORNER_ANCHOR_OVERFLOW_TOLERANCE_RATIO = 0.01
+    EDGE_SIDE_OVERFLOW_TOLERANCE_RATIO = 0.01
     MAX_PAIR_OVERLAP_PERCENTAGE = 5.0
+    MAX_CORNER_DEBUG_LAYOUTS = 24
+    CORNER_DEBUG_IMAGE_SIZE = (900, 700)
+    CORNER_DEBUG_OVERVIEW_SIZE = (360, 270)
+    CORNER_ENDPOINT_ANGLE_TOLERANCE = math.radians(3.0)
 
-    @classmethod
-    def solve(cls, puzzle: dict[int, PuzzlePiece]) -> list[int]:
-        solver = cls()
-        return solver._solve(puzzle)
+    def __init__(self, debug_dir: str | Path | None = None) -> None:
+        self.debug_dir = Path(debug_dir) if debug_dir is not None else None
+
+    def solve(self, puzzle: dict[int, PuzzlePiece] | None = None) -> list[int]:
+        if not isinstance(self, CornerWalk):
+            return CornerWalk()._solve(self)
+        if puzzle is None:
+            raise TypeError("puzzle is required")
+        return self._solve(puzzle)
 
     def _solve(self, puzzle: dict[int, PuzzlePiece]) -> list[int]:
         piece_count = len(puzzle)
@@ -216,9 +230,10 @@ class CornerWalk(Solver):
                         candidate,
                         frame_corner,
                     ):
-                        fitted = self._fit_inside_frame(placement, frame)
-                        if fitted is not None:
-                            piece_placements.append(fitted)
+                        # Corner placements must keep the detected corner vertex anchored
+                        # to the frame corner; fitting by translation creates false matches.
+                        if self._is_valid_corner_placement(placement, frame):
+                            piece_placements.append(placement)
 
                 piece_placements.sort(
                     key=lambda placement: (
@@ -269,12 +284,12 @@ class CornerWalk(Solver):
                 continue
 
             corner_index = self._corner_index(path)
+            if corner_index is None:
+                continue
             corner = path[corner_index]
-            previous_point = path[corner_index - 1]
-            next_point = path[corner_index + 1]
             if (
-                corner.get_distance_between(previous_point) <= 0.0
-                or corner.get_distance_between(next_point) <= 0.0
+                corner.get_distance_between(path[0]) <= 0.0
+                or corner.get_distance_between(path[-1]) <= 0.0
             ):
                 continue
 
@@ -286,8 +301,8 @@ class CornerWalk(Solver):
                     corner_index=corner_index,
                     corner=corner,
                     leg_angles=(
-                        self._angle(corner, previous_point),
-                        self._angle(corner, next_point),
+                        self._angle(corner, path[0]),
+                        self._angle(corner, path[-1]),
                     ),
                     length=self._path_length(path),
                 )
@@ -361,6 +376,8 @@ class CornerWalk(Solver):
                 pruned_overlap_count,
             )
 
+        self._save_corner_possibilities_debug_image(states, frame)
+
         for corner_layout in states:
             if len(puzzle) == 4:
                 best = self._choose_better(
@@ -400,6 +417,15 @@ class CornerWalk(Solver):
             for piece_id in remaining_piece_ids
         }
         if any(not edge_candidates for edge_candidates in edge_candidates_by_piece.values()):
+            logger.debug(
+                "corner_walk could not complete edges: missing straight edge candidates "
+                "for remaining pieces %s with candidate counts %s",
+                remaining_piece_ids,
+                {
+                    piece_id: len(candidates)
+                    for piece_id, candidates in edge_candidates_by_piece.items()
+                },
+            )
             return
 
         gaps_by_side = {
@@ -408,6 +434,11 @@ class CornerWalk(Solver):
         }
 
         first_piece_id, second_piece_id = remaining_piece_ids
+        first_fit_attempts = 0
+        first_fit_rejections = 0
+        second_fit_attempts = 0
+        second_fit_rejections = 0
+        generated_layouts = 0
         for first_side, second_side in itertools.permutations(frame.sides, 2):
             first_gap = gaps_by_side[first_side.name]
             second_gap = gaps_by_side[second_side.name]
@@ -419,14 +450,14 @@ class CornerWalk(Solver):
                     first_side,
                     first_gap,
                 )
+                first_fit_attempts += 1
                 first_placement = self._fit_inside_side_placement(
                     first_placement,
                     frame,
                     first_side,
                 )
                 if first_placement is None:
-                    continue
-                if self._overlaps_too_much(first_placement, corner_layout):
+                    first_fit_rejections += 1
                     continue
 
                 for second_candidate in edge_candidates_by_piece[second_piece_id]:
@@ -436,20 +467,39 @@ class CornerWalk(Solver):
                         second_side,
                         second_gap,
                     )
+                    second_fit_attempts += 1
                     second_placement = self._fit_inside_side_placement(
                         second_placement,
                         frame,
                         second_side,
                     )
                     if second_placement is None:
-                        continue
-                    if self._overlaps_too_much(
-                        second_placement,
-                        corner_layout + (first_placement,),
-                    ):
+                        second_fit_rejections += 1
                         continue
 
+                    generated_layouts += 1
                     yield corner_layout + (first_placement, second_placement)
+
+        if generated_layouts == 0:
+            logger.debug(
+                "corner_walk generated no edge completions for corner pieces %s; "
+                "remaining=%s, gaps=%s, edge_candidate_counts=%s, "
+                "first_fit_rejections=%d/%d, second_fit_rejections=%d/%d",
+                [placement.piece_id for placement in corner_layout],
+                remaining_piece_ids,
+                {
+                    side_name: (round(gap[0], 2), round(gap[1], 2))
+                    for side_name, gap in gaps_by_side.items()
+                },
+                {
+                    piece_id: len(candidates)
+                    for piece_id, candidates in edge_candidates_by_piece.items()
+                },
+                first_fit_rejections,
+                first_fit_attempts,
+                second_fit_rejections,
+                second_fit_attempts,
+            )
 
     def _build_edge_candidates(
         self,
@@ -458,12 +508,11 @@ class CornerWalk(Solver):
     ) -> tuple[_EdgeCandidate, ...]:
         candidates: list[_EdgeCandidate] = []
         for outer_edge_index, outer_edge in enumerate(piece.possible_outer_edges):
-            if outer_edge.type != PieceType.EDGE:
-                continue
-
             for reversed_path in (False, True):
                 points = self._outer_edge_points(outer_edge, reversed_path)
                 if len(points) < 2:
+                    continue
+                if not self._is_straight_path(points):
                     continue
 
                 length = self._path_length(points)
@@ -509,8 +558,17 @@ class CornerWalk(Solver):
             target_anchor=target_anchor,
             rotation=rotation,
             boundary_points=candidate.points,
-            alignment_error=0.0,
+            alignment_error=self._edge_gap_length_error(candidate.length, gap),
         )
+
+    @staticmethod
+    def _edge_gap_length_error(
+        candidate_length: float,
+        gap: tuple[float, float],
+    ) -> float:
+        gap_length = max(0.0, gap[1] - gap[0])
+        denominator = max(candidate_length, gap_length, 1.0)
+        return abs(candidate_length - gap_length) / denominator
 
     def _make_placement(
         self,
@@ -651,6 +709,202 @@ class CornerWalk(Solver):
             sum(placement.alignment_error for placement in placements),
         )
 
+    def _save_corner_possibilities_debug_image(
+        self,
+        layouts: list[tuple[_Placement, ...]],
+        frame: _Frame,
+    ) -> None:
+        if self.debug_dir is None:
+            return
+
+        self.debug_dir.mkdir(parents=True, exist_ok=True)
+        output_path = self.debug_dir / "corner_walk_corner_possibilities.png"
+        detail_dir = self.debug_dir / "corner_walk_corner_possibilities"
+        detail_dir.mkdir(parents=True, exist_ok=True)
+        for previous_image in detail_dir.glob("possibility_*.png"):
+            if previous_image.is_file():
+                previous_image.unlink()
+
+        if not layouts:
+            image = Image.new("RGB", (560, 120), (255, 255, 255))
+            draw = ImageDraw.Draw(image)
+            draw.text(
+                (24, 44),
+                "No retained corner placement possibilities",
+                fill=(0, 0, 0),
+                font=ImageFont.load_default(),
+            )
+            image.save(output_path)
+            logger.info("Saved corner placement debug image to %s", output_path)
+            return
+
+        for index, placements in enumerate(layouts, start=1):
+            image = self._render_corner_layout_debug_image(
+                placements,
+                frame,
+                layout_index=index,
+                total_layouts=len(layouts),
+                image_size=self.CORNER_DEBUG_IMAGE_SIZE,
+            )
+            image.convert("RGB").save(detail_dir / f"possibility_{index:04d}.png")
+
+        selected_layouts = layouts[: self.MAX_CORNER_DEBUG_LAYOUTS]
+        thumbnails = [
+            self._render_corner_layout_debug_image(
+                placements,
+                frame,
+                layout_index=index + 1,
+                total_layouts=len(layouts),
+                image_size=self.CORNER_DEBUG_OVERVIEW_SIZE,
+            )
+            for index, placements in enumerate(selected_layouts)
+        ]
+
+        columns = min(4, len(thumbnails))
+        rows = math.ceil(len(thumbnails) / columns)
+        gap = 14
+        title_height = 34
+        thumb_width, thumb_height = thumbnails[0].size
+        sheet_width = columns * thumb_width + (columns + 1) * gap
+        sheet_height = title_height + rows * thumb_height + (rows + 1) * gap
+        sheet = Image.new("RGB", (sheet_width, sheet_height), (248, 248, 248))
+        draw = ImageDraw.Draw(sheet)
+        draw.text(
+            (gap, 9),
+            (
+                "Corner placements after four frame corners: "
+                f"showing {len(selected_layouts)} of {len(layouts)} possibilities"
+            ),
+            fill=(0, 0, 0),
+            font=ImageFont.load_default(),
+        )
+
+        for index, thumbnail in enumerate(thumbnails):
+            column = index % columns
+            row = index // columns
+            x = gap + column * (thumb_width + gap)
+            y = title_height + gap + row * (thumb_height + gap)
+            sheet.paste(thumbnail.convert("RGB"), (x, y))
+
+        sheet.save(output_path)
+        logger.info(
+            "Saved %d corner placement debug images to %s and overview to %s",
+            len(layouts),
+            detail_dir,
+            output_path,
+        )
+
+    def _render_corner_layout_debug_image(
+        self,
+        placements: tuple[_Placement, ...],
+        frame: _Frame,
+        layout_index: int,
+        total_layouts: int,
+        image_size: tuple[int, int],
+    ) -> Image.Image:
+        width, height = image_size
+        caption_height = 42
+        margin = 20
+        drawing_height = height - caption_height
+        scale = min(
+            (width - 2 * margin) / max(frame.width, 1.0),
+            (drawing_height - 2 * margin) / max(frame.height, 1.0),
+        )
+        offset_x = (width - frame.width * scale) / 2.0
+        offset_y = margin
+
+        def to_image_coords(x: float, y: float) -> tuple[int, int]:
+            return (
+                int(round(offset_x + x * scale)),
+                int(round(offset_y + y * scale)),
+            )
+
+        image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()
+        colors = (
+            (31, 119, 180, 110),
+            (255, 127, 14, 110),
+            (44, 160, 44, 110),
+            (214, 39, 40, 110),
+            (148, 103, 189, 110),
+            (140, 86, 75, 110),
+        )
+
+        frame_min = to_image_coords(0.0, 0.0)
+        frame_max = to_image_coords(frame.width, frame.height)
+        draw.rectangle((*frame_min, *frame_max), outline=(0, 0, 0, 255), width=2)
+
+        for placement_index, placement in enumerate(placements):
+            color = colors[placement_index % len(colors)]
+            outline = color[:3] + (255,)
+            for polygon in self._geometry_polygons(placement.polygon):
+                exterior = [
+                    to_image_coords(float(x), float(y))
+                    for x, y in polygon.exterior.coords
+                ]
+                if len(exterior) >= 3:
+                    draw.polygon(exterior, fill=color, outline=outline)
+                for interior in polygon.interiors:
+                    hole = [
+                        to_image_coords(float(x), float(y))
+                        for x, y in interior.coords
+                    ]
+                    if len(hole) >= 3:
+                        draw.polygon(hole, fill=(255, 255, 255, 255))
+
+            boundary = [
+                to_image_coords(point.x, point.y)
+                for point in placement.boundary_points
+            ]
+            if len(boundary) >= 2:
+                draw.line(boundary, fill=outline, width=3)
+
+            centroid = placement.polygon.centroid
+            label_x, label_y = to_image_coords(float(centroid.x), float(centroid.y))
+            draw.ellipse(
+                (label_x - 3, label_y - 3, label_x + 3, label_y + 3),
+                fill=(0, 0, 0, 255),
+            )
+            draw.text(
+                (label_x + 5, label_y + 3),
+                str(placement.piece_id),
+                fill=(0, 0, 0, 255),
+                font=font,
+            )
+
+        score = self._score_layout(placements, frame)
+        caption_y = height - caption_height + 7
+        draw.text(
+            (10, caption_y),
+            f"#{layout_index}/{total_layouts} pieces {[p.piece_id for p in placements]}",
+            fill=(0, 0, 0, 255),
+            font=font,
+        )
+        draw.text(
+            (10, caption_y + 17),
+            f"overlap {score[0]:.1f} overflow {score[1]:.1f} align {score[2]:.3f}",
+            fill=(0, 0, 0, 255),
+            font=font,
+        )
+        return image
+
+    @staticmethod
+    def _geometry_polygons(geometry: BaseGeometry) -> Iterable[ShapelyPolygon]:
+        if geometry.is_empty:
+            return
+        if isinstance(geometry, ShapelyPolygon):
+            yield geometry
+            return
+        if isinstance(geometry, MultiPolygon):
+            yield from geometry.geoms
+            return
+        for part in getattr(geometry, "geoms", ()):
+            if isinstance(part, ShapelyPolygon):
+                yield part
+            elif isinstance(part, MultiPolygon):
+                yield from part.geoms
+
     @staticmethod
     def _choose_better(
         current: _Layout | None,
@@ -711,6 +965,30 @@ class CornerWalk(Solver):
         return cls._overflow_area(placement, frame) <= tolerance
 
     @classmethod
+    def _is_valid_corner_placement(
+        cls,
+        placement: _Placement,
+        frame: _Frame,
+    ) -> bool:
+        tolerance = max(
+            1e-3,
+            placement.area * cls.CORNER_ANCHOR_OVERFLOW_TOLERANCE_RATIO,
+        )
+        return cls._overflow_area(placement, frame) <= tolerance
+
+    @classmethod
+    def _is_valid_side_placement(
+        cls,
+        placement: _Placement,
+        frame: _Frame,
+    ) -> bool:
+        tolerance = max(
+            1e-3,
+            placement.area * cls.EDGE_SIDE_OVERFLOW_TOLERANCE_RATIO,
+        )
+        return cls._overflow_area(placement, frame) <= tolerance
+
+    @classmethod
     def _fit_inside_frame(
         cls,
         placement: _Placement,
@@ -750,7 +1028,7 @@ class CornerWalk(Solver):
         min_x, min_y, max_x, max_y = placement.bounds
         tolerance = max(
             1e-3,
-            placement.area * cls.INSIDE_FRAME_AREA_TOLERANCE_RATIO,
+            placement.area * cls.EDGE_SIDE_OVERFLOW_TOLERANCE_RATIO,
         )
 
         dx = 0.0
@@ -774,7 +1052,7 @@ class CornerWalk(Solver):
         if abs(dx) > 1e-9 or abs(dy) > 1e-9:
             fitted = cls._move_placement(placement, dx, dy)
 
-        if not cls._is_inside_frame(fitted, frame):
+        if not cls._is_valid_side_placement(fitted, frame):
             return None
         return fitted
 
@@ -825,18 +1103,33 @@ class CornerWalk(Solver):
         for piece in puzzle.values():
             piece.translate(Point(min_x, min_y), Point(0.0, 0.0))
 
-    @staticmethod
-    def _corner_index(points: tuple[Point, ...]) -> int:
-        best_index = 1
+    @classmethod
+    def _corner_index(cls, points: tuple[Point, ...]) -> int | None:
+        best_index: int | None = None
         best_error = float("inf")
+        first_point = points[0]
+        last_point = points[-1]
         for index in range(1, len(points) - 1):
-            incoming_angle = CornerWalk._angle(points[index], points[index - 1])
-            outgoing_angle = CornerWalk._angle(points[index], points[index + 1])
-            corner_angle = abs(CornerWalk._normalize_angle(outgoing_angle - incoming_angle))
+            corner = points[index]
+            if (
+                corner.get_distance_between(first_point) <= 0.0
+                or corner.get_distance_between(last_point) <= 0.0
+            ):
+                continue
+
+            incoming_angle = cls._angle(corner, first_point)
+            outgoing_angle = cls._angle(corner, last_point)
+            corner_angle = abs(cls._normalize_angle(outgoing_angle - incoming_angle))
             error = abs(corner_angle - math.pi / 2.0)
             if error < best_error:
                 best_index = index
                 best_error = error
+
+        if (
+            best_index is None
+            or best_error > cls.CORNER_ENDPOINT_ANGLE_TOLERANCE
+        ):
+            return None
         return best_index
 
     @staticmethod
@@ -857,6 +1150,21 @@ class CornerWalk(Solver):
             start.get_distance_between(end)
             for start, end in zip(points, points[1:])
         )
+
+    @classmethod
+    def _is_straight_path(cls, points: tuple[Point, ...]) -> bool:
+        if len(points) <= 2:
+            return True
+
+        base_angle = cls._angle(points[0], points[1])
+        for start, end in zip(points, points[1:]):
+            if start.get_distance_between(end) <= 0.0:
+                continue
+            if abs(cls._normalize_angle(cls._angle(start, end) - base_angle)) > (
+                cls.STRAIGHT_EDGE_TOLERANCE
+            ):
+                return False
+        return True
 
     @staticmethod
     def _make_geometry(points: list[tuple[float, float]]) -> BaseGeometry:

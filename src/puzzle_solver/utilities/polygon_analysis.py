@@ -61,7 +61,7 @@ def analyze_polygon(poly: Polygon) -> List[OuterEdge]:
     outer_edges: List[OuterEdge] = [OuterEdge(edges=c) for c in combos if c]
 
     perimeter = poly.perimeter()
-    outer_edges = [oe for oe in outer_edges if oe.length >= 0.1 * perimeter]
+    outer_edges = [oe for oe in outer_edges if oe.length >= 0.05 * perimeter]
 
     return sorted(outer_edges, key=lambda oe: -oe.length)
 

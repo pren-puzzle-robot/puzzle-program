@@ -81,7 +81,7 @@ def main():
     elif args.variant in {"edge_walk", "edge-walk"}:
         solver = EdgeWalk()
     elif args.variant in {"corner_walk", "corner-walk"}:
-        solver = CornerWalk()
+        solver = CornerWalk(debug_dir=args.outdir)
     else:
         solver = Match()
 
