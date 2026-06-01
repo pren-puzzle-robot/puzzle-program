@@ -5,6 +5,7 @@ import logging
 import math
 from pathlib import Path
 import shutil
+import time
 
 import cv2 as cv
 
@@ -252,7 +253,12 @@ class PuzzleSolver:
             img.save(self.output_dir / f"piece_{piece_id+1}_edges.png")
 
         solver = self._create_solver(puzzle_pieces)
+
+        start_time = time.time()
         ordered_piece_ids = solver.solve(puzzle_pieces)
+        end_time = time.time()
+        logger.info("======= Solver took %.2f seconds =======", end_time - start_time)
+
         logger.info("Solver produced piece order %s", ordered_piece_ids)
         self._save_debug_image(puzzle_pieces)
         normalized_end_positions, normalized_rotations, normalized_debug_pieces = (
