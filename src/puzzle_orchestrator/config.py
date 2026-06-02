@@ -22,6 +22,7 @@ class RuntimeConfig:
 @dataclass(frozen=True)
 class AudioConfig:
     enabled: bool
+    ready: Path | None
     start: Path | None
     in_progress_loop: Path | None
     success: Path | None
@@ -106,6 +107,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "runtime": {"loop": "false"},
             "audio": {
                 "enabled": "false",
+                "ready": "",
                 "start": "",
                 "in_progress_loop": "",
                 "success": "",
@@ -165,6 +167,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         ),
         audio=AudioConfig(
             enabled=parser.getboolean("audio", "enabled"),
+            ready=_optional_path(
+                parser.get("audio", "ready"),
+                config_path.parent,
+            ),
             start=_optional_path(
                 parser.get("audio", "start"),
                 config_path.parent,

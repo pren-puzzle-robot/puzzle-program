@@ -90,6 +90,7 @@ def main() -> None:
     configure_logging(config)
     logger = logging.getLogger(__name__)
     sound_player = SoundPlayer.from_config(config.audio)
+    sound_player.play_ready()
 
     try:
         camera_controller = build_camera_controller(config)

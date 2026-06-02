@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ErrorSoundMap:
+    ready: Path | None
     start: Path | None
     in_progress_loop: Path | None
     success: Path | None
@@ -29,6 +30,7 @@ class ErrorSoundMap:
     @classmethod
     def from_config(cls, config: AudioConfig) -> "ErrorSoundMap":
         return cls(
+            ready=config.ready,
             start=config.start,
             in_progress_loop=config.in_progress_loop,
             success=config.success,
@@ -75,6 +77,9 @@ class SoundPlayer:
     def play_success(self) -> None:
         self.stop_in_progress_loop()
         self._play(self._error_sounds.success, "success", None)
+
+    def play_ready(self) -> None:
+        self._play(self._error_sounds.ready, "ready", None)
 
     def play_error(self, stage: str, error: BaseException) -> None:
         self.stop_in_progress_loop()
