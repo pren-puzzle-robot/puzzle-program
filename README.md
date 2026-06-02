@@ -32,8 +32,8 @@ one level above the `src` folder.
 | Section | Key | Default | Description |
 | --- | --- | --- | --- |
 | `logging` | `level` | `DEBUG` | Python logging level used by `puzzle_orchestrator`, for example `DEBUG`, `INFO`, or `WARNING`. |
-| `audio` | `enabled` | `false` | Enables error sound playback. |
-| `audio` | `success`, `camera_error`, `solver_error`, `coordinate_mapper_error`, `microcontroller_error`, `unexpected_error` | empty | Optional audio file paths for completion and error categories. Relative paths are resolved from the folder containing `config.ini`. |
+| `audio` | `enabled` | `false` | Enables audio playback. |
+| `audio` | `start`, `in_progress_loop`, `success`, `camera_error`, `solver_error`, `coordinate_mapper_error`, `microcontroller_error`, `unexpected_error` | empty | Optional audio file paths. `start` plays once asynchronously after the microcontroller start command is received. `in_progress_loop` starts after `start` finishes and repeats until the run ends. Relative paths are resolved from the folder containing `config.ini`. |
 | `audio.error_sounds` | `<stage>.<ExceptionType>`, `<stage>.default`, `<ExceptionType>`, `default` | empty | Optional fine-grained sound rules. Matching order is `stage.ExceptionType`, then `stage.default`, then `ExceptionType`, then `default`. Exception inheritance is respected, so e.g. `TimeoutError` also matches `OSError` and `Exception` fallbacks. |
 | `microcontroller` | `transport` | `stub` | Microcontroller backend. Supported values: `uart`, `stub`. `stub` skips real UART communication. |
 | `uart` | `port` | `/dev/serial0` | UART device path, for example `COM3` on Windows. |
@@ -64,6 +64,8 @@ Example audio configuration:
 ```ini
 [audio]
 enabled = true
+start = sounds/start.wav
+in_progress_loop = sounds/in_progress_loop.wav
 success = sounds/happy_wheels_victory.wav
 camera_error = sounds/camera_error.wav
 solver_error = sounds/solver_error.wav

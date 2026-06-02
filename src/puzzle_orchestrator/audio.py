@@ -4,6 +4,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import threading
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ErrorSoundMap:
+    start: Path | None
+    in_progress_loop: Path | None
     success: Path | None
     camera: Path | None
     solver: Path | None
@@ -26,6 +29,8 @@ class ErrorSoundMap:
     @classmethod
     def from_config(cls, config: AudioConfig) -> "ErrorSoundMap":
         return cls(
+            start=config.start,
+            in_progress_loop=config.in_progress_loop,
             success=config.success,
             camera=config.camera_error,
             solver=config.solver_error,
@@ -40,6 +45,9 @@ class SoundPlayer:
     def __init__(self, enabled: bool, error_sounds: ErrorSoundMap) -> None:
         self._enabled = enabled
         self._error_sounds = error_sounds
+        self._background_stop = threading.Event()
+        self._background_thread: threading.Thread | None = None
+        self._background_lock = threading.Lock()
 
     @classmethod
     def from_config(cls, config: AudioConfig) -> "SoundPlayer":
@@ -64,11 +72,66 @@ class SoundPlayer:
         self.play_error("unexpected", error)
 
     def play_success(self) -> None:
+        self.stop_in_progress_loop()
         self._play(self._error_sounds.success, "success", None)
 
     def play_error(self, stage: str, error: BaseException) -> None:
+        self.stop_in_progress_loop()
         sound_path = self._resolve_sound_path(stage, error)
         self._play(sound_path, stage, error)
+
+    def start_run_audio(self) -> None:
+        if not self._enabled:
+            return
+        if self._error_sounds.start is None and self._error_sounds.in_progress_loop is None:
+            return
+
+        self.stop_in_progress_loop()
+
+        with self._background_lock:
+            self._background_stop = threading.Event()
+            self._background_thread = threading.Thread(
+                target=self._run_background_audio,
+                name="run-audio",
+                daemon=True,
+            )
+            self._background_thread.start()
+
+    def stop_in_progress_loop(self) -> None:
+        with self._background_lock:
+            stop_event = self._background_stop
+            thread = self._background_thread
+            self._background_thread = None
+
+        stop_event.set()
+        self._stop_platform_loop()
+
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=0.5)
+
+    def _run_background_audio(self) -> None:
+        stop_event = self._background_stop
+
+        if self._error_sounds.start is not None:
+            self._play(self._error_sounds.start, "start", None)
+
+        loop_sound_path = self._error_sounds.in_progress_loop
+        if stop_event.is_set() or loop_sound_path is None:
+            return
+        if not loop_sound_path.exists():
+            logger.warning(
+                "Configured sound for %s does not exist: %s",
+                "in_progress_loop",
+                loop_sound_path,
+            )
+            return
+
+        if self._start_platform_loop(loop_sound_path):
+            stop_event.wait()
+            return
+
+        while not stop_event.is_set():
+            self._play(loop_sound_path, "in_progress_loop", None)
 
     def _resolve_sound_path(self, stage: str, error: BaseException) -> Path | None:
         stage_key = stage.strip().lower()
@@ -211,3 +274,29 @@ class SoundPlayer:
             pass
 
         return 10.0
+
+    @staticmethod
+    def _start_platform_loop(sound_path: Path) -> bool:
+        sound_path = sound_path.resolve()
+        if not sound_path.exists():
+            raise FileNotFoundError(sound_path)
+
+        if sys.platform == "win32":
+            import winsound
+
+            winsound.PlaySound(
+                str(sound_path),
+                winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_LOOP,
+            )
+            return True
+
+        return False
+
+    @staticmethod
+    def _stop_platform_loop() -> None:
+        if sys.platform != "win32":
+            return
+
+        import winsound
+
+        winsound.PlaySound(None, 0)

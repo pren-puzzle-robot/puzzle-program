@@ -17,6 +17,8 @@ class LoggingConfig:
 @dataclass(frozen=True)
 class AudioConfig:
     enabled: bool
+    start: Path | None
+    in_progress_loop: Path | None
     success: Path | None
     camera_error: Path | None
     solver_error: Path | None
@@ -97,6 +99,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "logging": {"level": "DEBUG"},
             "audio": {
                 "enabled": "false",
+                "start": "",
+                "in_progress_loop": "",
                 "success": "",
                 "camera_error": "",
                 "solver_error": "",
@@ -151,6 +155,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         ),
         audio=AudioConfig(
             enabled=parser.getboolean("audio", "enabled"),
+            start=_optional_path(
+                parser.get("audio", "start"),
+                config_path.parent,
+            ),
+            in_progress_loop=_optional_path(
+                parser.get("audio", "in_progress_loop"),
+                config_path.parent,
+            ),
             success=_optional_path(
                 parser.get("audio", "success"),
                 config_path.parent,

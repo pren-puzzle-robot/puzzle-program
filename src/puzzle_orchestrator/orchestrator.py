@@ -42,36 +42,40 @@ class PuzzleOrchestrator:
             operation=self.microcontroller_interface.wait_for_start_command,
         )
         logger.info("Start command received; running orchestration cycle")
+        self.sound_player.start_run_audio()
 
-        logger.info("Starting puzzle orchestration cycle")
-        frame = self._run_stage(
-            stage_name="camera capture_frame",
-            sound_stage="camera",
-            operation=self.camera_controller.capture_frame,
-        )
-        logger.info("Captured frame: %s", frame)
+        try:
+            logger.info("Starting puzzle orchestration cycle")
+            frame = self._run_stage(
+                stage_name="camera capture_frame",
+                sound_stage="camera",
+                operation=self.camera_controller.capture_frame,
+            )
+            logger.info("Captured frame: %s", frame)
 
-        grid_path = self._run_stage(
-            stage_name="solver solve",
-            sound_stage="solver",
-            operation=lambda: self.puzzle_solver.solve(frame),
-        )
-        logger.info("Solver produced %d placement steps", len(grid_path))
+            grid_path = self._run_stage(
+                stage_name="solver solve",
+                sound_stage="solver",
+                operation=lambda: self.puzzle_solver.solve(frame),
+            )
+            logger.info("Solver produced %d placement steps", len(grid_path))
 
-        machine_path = self._run_stage(
-            stage_name="coordinate mapper map_to_machine",
-            sound_stage="coordinate_mapper",
-            operation=lambda: self.coordinate_mapper.map_to_machine(grid_path, frame=frame),
-        )
-        logger.info("Mapped %d machine placements", len(machine_path))
+            machine_path = self._run_stage(
+                stage_name="coordinate mapper map_to_machine",
+                sound_stage="coordinate_mapper",
+                operation=lambda: self.coordinate_mapper.map_to_machine(grid_path, frame=frame),
+            )
+            logger.info("Mapped %d machine placements", len(machine_path))
 
-        result = self._run_stage(
-            stage_name="microcontroller send_path",
-            sound_stage="microcontroller",
-            operation=lambda: self.microcontroller_interface.send_path(machine_path),
-        )
-        logger.info("Microcontroller accepted path with result=%s", result)
-        return result
+            result = self._run_stage(
+                stage_name="microcontroller send_path",
+                sound_stage="microcontroller",
+                operation=lambda: self.microcontroller_interface.send_path(machine_path),
+            )
+            logger.info("Microcontroller accepted path with result=%s", result)
+            return result
+        finally:
+            self.sound_player.stop_in_progress_loop()
 
     def _run_stage(
         self,
