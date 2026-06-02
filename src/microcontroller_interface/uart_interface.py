@@ -305,38 +305,24 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
             SimpleSendCommand.LOWER,
             SimpleSendCommand.HOLD_OFF,
             SimpleSendCommand.LIFT,
-            # SimpleSendCommand.RESET,
         ):
             self._send_transport_command(command)
             # Sleep olny on Hold Off
             if command is SimpleSendCommand.HOLD_OFF:
                 time.sleep(1.5)
-            if command is SimpleSendCommand.HOLD_ON:
+            elif command is SimpleSendCommand.HOLD_ON:
                 time.sleep(2)
-            if command is SimpleSendCommand.LIFT:
+            elif command is SimpleSendCommand.LIFT:
                 time.sleep(1)
+            else:
+                time.sleep(0.3)
 
     def _send_transport_command(self, command: MoveCommand | SimpleSendCommand) -> None:
         if isinstance(command, MoveCommand):
-            self._send_reset_before_first_move()
             payload = self._encode_move(command)
         else:
             payload = self._handler.encode_simple_command(command)
         self._session.send_payload_with_handshake(payload)
-
-    def _send_reset_before_first_move(self) -> None:
-        if self._reset_before_first_move_sent:
-            return
-
-        with self._first_move_lock:
-            if self._reset_before_first_move_sent:
-                return
-
-            logger.info("Sending reset command before first move and waiting for done")
-            self._session.send_payload_with_handshake(
-                self._handler.encode_simple_command(SimpleSendCommand.RESET)
-            )
-            self._reset_before_first_move_sent = True
 
     def _encode_move(self, command: MoveCommand) -> bytes:
         return self._handler.encode_move_payload(command)

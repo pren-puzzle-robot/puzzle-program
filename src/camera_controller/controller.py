@@ -78,6 +78,22 @@ class CameraController:
 
         raise CameraConnectionError(f"All shutter endpoints failed: {urls}") from last_error
 
+    def _set_zoom_percent(self, percent: int) -> None:
+        if not 0 <= percent <= 100:
+            raise ValueError("zoom percent must be between 0 and 100")
+
+        zoom_urls = [
+            f"{self.gopro_base_url}/gp/gpControl/command/digital_zoom?range_pcnt={percent}"
+        ]
+        logger.info("Setting camera digital zoom to %d%%", percent)
+        try:
+            self._try_send_get(zoom_urls)
+        except CameraConnectionError:
+            logger.warning(
+                "Camera did not accept digital zoom command; continuing without enforcing %d%% zoom",
+                percent,
+            )
+
     def _download_file(self, source_url: str, destination: Path) -> None:
         logger.debug("Downloading %s to %s", source_url, destination)
         req = urllib.request.Request(url=source_url, method="GET")
@@ -365,6 +381,8 @@ class CameraController:
 
         logger.info("Setting camera sub-mode to single photo")
         self._try_send_get(sub_mode_urls)
+
+        self._set_zoom_percent(100)
 
         logger.info("Triggering camera shutter")
         self._try_send_get(shutter_urls)

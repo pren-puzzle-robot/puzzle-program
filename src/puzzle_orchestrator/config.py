@@ -15,6 +15,11 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class RuntimeConfig:
+    loop: bool
+
+
+@dataclass(frozen=True)
 class AudioConfig:
     enabled: bool
     start: Path | None
@@ -79,6 +84,7 @@ class SolverConfig:
 @dataclass(frozen=True)
 class AppConfig:
     logging: LoggingConfig
+    runtime: RuntimeConfig
     audio: AudioConfig
     microcontroller: MicrocontrollerConfig
     uart: UartConfig
@@ -97,6 +103,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     parser.read_dict(
         {
             "logging": {"level": "DEBUG"},
+            "runtime": {"loop": "false"},
             "audio": {
                 "enabled": "false",
                 "start": "",
@@ -152,6 +159,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     return AppConfig(
         logging=LoggingConfig(
             level=parser.get("logging", "level").strip(),
+        ),
+        runtime=RuntimeConfig(
+            loop=parser.getboolean("runtime", "loop"),
         ),
         audio=AudioConfig(
             enabled=parser.getboolean("audio", "enabled"),

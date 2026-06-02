@@ -32,6 +32,7 @@ one level above the `src` folder.
 | Section | Key | Default | Description |
 | --- | --- | --- | --- |
 | `logging` | `level` | `DEBUG` | Python logging level used by `puzzle_orchestrator`, for example `DEBUG`, `INFO`, or `WARNING`. |
+| `runtime` | `loop` | `false` | If `true`, the orchestrator runs continuously and starts a new cycle after each completed or failed run. If `false`, it performs exactly one run and then exits. |
 | `audio` | `enabled` | `false` | Enables audio playback. |
 | `audio` | `start`, `in_progress_loop`, `success`, `camera_error`, `solver_error`, `coordinate_mapper_error`, `microcontroller_error`, `unexpected_error` | empty | Optional audio file paths. `start` plays once asynchronously after the microcontroller start command is received. `in_progress_loop` starts after `start` finishes and repeats until the run ends. Relative paths are resolved from the folder containing `config.ini`. |
 | `audio.error_sounds` | `<stage>.<ExceptionType>`, `<stage>.default`, `<ExceptionType>`, `default` | empty | Optional fine-grained sound rules. Matching order is `stage.ExceptionType`, then `stage.default`, then `ExceptionType`, then `default`. Exception inheritance is respected, so e.g. `TimeoutError` also matches `OSError` and `Exception` fallbacks. |

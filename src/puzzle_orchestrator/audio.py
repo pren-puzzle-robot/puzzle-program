@@ -47,6 +47,7 @@ class SoundPlayer:
         self._error_sounds = error_sounds
         self._background_stop = threading.Event()
         self._background_thread: threading.Thread | None = None
+        self._background_process: subprocess.Popen[bytes] | None = None
         self._background_lock = threading.Lock()
 
     @classmethod
@@ -105,6 +106,7 @@ class SoundPlayer:
 
         stop_event.set()
         self._stop_platform_loop()
+        self._stop_background_process()
 
         if thread is not None and thread.is_alive():
             thread.join(timeout=0.5)
@@ -113,7 +115,7 @@ class SoundPlayer:
         stop_event = self._background_stop
 
         if self._error_sounds.start is not None:
-            self._play(self._error_sounds.start, "start", None)
+            self._play_background_start(self._error_sounds.start, stop_event)
 
         loop_sound_path = self._error_sounds.in_progress_loop
         if stop_event.is_set() or loop_sound_path is None:
@@ -131,7 +133,61 @@ class SoundPlayer:
             return
 
         while not stop_event.is_set():
-            self._play(loop_sound_path, "in_progress_loop", None)
+            self._play_background_loop(loop_sound_path, stop_event)
+
+    def _play_background_start(self, sound_path: Path, stop_event: threading.Event) -> None:
+        if not self._enabled:
+            return
+        if not sound_path.exists():
+            logger.warning("Configured sound for %s does not exist: %s", "start", sound_path)
+            return
+
+        if sys.platform == "win32":
+            try:
+                self._play_windows_path_async(sound_path)
+                if stop_event.wait(timeout=self._playback_timeout_seconds(sound_path)):
+                    self._stop_platform_loop()
+            except Exception:
+                logger.exception("Failed to play sound for %s: %s", "start", sound_path)
+            return
+
+        try:
+            self._play_background_process(sound_path, stop_event)
+        except Exception:
+            logger.exception("Failed to play sound for %s: %s", "start", sound_path)
+
+    def _play_background_loop(self, sound_path: Path, stop_event: threading.Event) -> None:
+        if sys.platform == "win32":
+            self._play(sound_path, "in_progress_loop", None)
+            return
+
+        try:
+            self._play_background_process(sound_path, stop_event)
+        except Exception:
+            logger.exception("Failed to play sound for %s: %s", "in_progress_loop", sound_path)
+            stop_event.set()
+
+    def _play_background_process(self, sound_path: Path, stop_event: threading.Event) -> None:
+        process = self._start_background_process(sound_path)
+        if process is None:
+            self._play(sound_path, "background", None)
+            return
+
+        with self._background_lock:
+            if stop_event.is_set():
+                process.terminate()
+                return
+            self._background_process = process
+
+        try:
+            while process.poll() is None:
+                if stop_event.wait(timeout=0.1):
+                    self._terminate_process(process)
+                    break
+        finally:
+            with self._background_lock:
+                if self._background_process is process:
+                    self._background_process = None
 
     def _resolve_sound_path(self, stage: str, error: BaseException) -> Path | None:
         stage_key = stage.strip().lower()
@@ -210,31 +266,19 @@ class SoundPlayer:
             raise FileNotFoundError(sound_path)
 
         if sys.platform == "win32":
-            import winsound
-
-            winsound.PlaySound(
-                str(sound_path),
-                winsound.SND_FILENAME,
-            )
+            SoundPlayer._play_windows_path_sync(sound_path)
             return
 
         errors: list[str] = []
         timeout_seconds = SoundPlayer._playback_timeout_seconds(sound_path)
 
-        for command in (
-            ("aplay", "-q", "-D", "plughw:2,0"),
-            ("aplay", "-q"),
-            ("pw-play",),
-            ("paplay",),
-            ("ffplay", "-nodisp", "-autoexit", "-loglevel", "error"),
-        ):
-            executable = shutil.which(command[0])
+        for executable, args in SoundPlayer._iter_playback_commands():
             if executable is None:
                 continue
 
             try:
                 completed = subprocess.run(
-                    [executable, *command[1:], str(sound_path)],
+                    [executable, *args, str(sound_path)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -244,7 +288,7 @@ class SoundPlayer:
                 )
             except subprocess.TimeoutExpired:
                 errors.append(
-                    f"{command[0]} timed out after {timeout_seconds:.1f} seconds"
+                    f"{Path(executable).name} timed out after {timeout_seconds:.1f} seconds"
                 )
                 continue
 
@@ -253,9 +297,9 @@ class SoundPlayer:
 
             output = (completed.stderr or completed.stdout).strip()
             if output:
-                errors.append(f"{command[0]} exited with {completed.returncode}: {output}")
+                errors.append(f"{Path(executable).name} exited with {completed.returncode}: {output}")
             else:
-                errors.append(f"{command[0]} exited with {completed.returncode}")
+                errors.append(f"{Path(executable).name} exited with {completed.returncode}")
 
         if errors:
             raise RuntimeError("Audio playback failed: " + "; ".join(errors))
@@ -276,6 +320,64 @@ class SoundPlayer:
         return 10.0
 
     @staticmethod
+    def _iter_playback_commands() -> list[tuple[str | None, tuple[str, ...]]]:
+        return [
+            (shutil.which("aplay"), ("-q", "-D", "plughw:2,0")),
+            (shutil.which("aplay"), ("-q",)),
+            (shutil.which("pw-play"), ()),
+            (shutil.which("paplay"), ()),
+            (shutil.which("ffplay"), ("-nodisp", "-autoexit", "-loglevel", "error")),
+        ]
+
+    @staticmethod
+    def _start_background_process(sound_path: Path) -> subprocess.Popen[bytes] | None:
+        sound_path = sound_path.resolve()
+        if not sound_path.exists():
+            raise FileNotFoundError(sound_path)
+
+        if sys.platform == "win32":
+            return None
+
+        errors: list[str] = []
+        for executable, args in SoundPlayer._iter_playback_commands():
+            if executable is None:
+                continue
+
+            try:
+                return subprocess.Popen(
+                    [executable, *args, str(sound_path)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except OSError as exc:
+                errors.append(f"{Path(executable).name} failed to start: {exc}")
+
+        if errors:
+            raise RuntimeError("Audio playback failed: " + "; ".join(errors))
+
+        raise RuntimeError("No supported audio playback command found")
+
+    def _stop_background_process(self) -> None:
+        with self._background_lock:
+            process = self._background_process
+            self._background_process = None
+
+        if process is not None:
+            self._terminate_process(process)
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is not None:
+            return
+
+        process.terminate()
+        try:
+            process.wait(timeout=0.3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=0.3)
+
+    @staticmethod
     def _start_platform_loop(sound_path: Path) -> bool:
         sound_path = sound_path.resolve()
         if not sound_path.exists():
@@ -291,6 +393,24 @@ class SoundPlayer:
             return True
 
         return False
+
+    @staticmethod
+    def _play_windows_path_sync(sound_path: Path) -> None:
+        import winsound
+
+        winsound.PlaySound(
+            str(sound_path),
+            winsound.SND_FILENAME,
+        )
+
+    @staticmethod
+    def _play_windows_path_async(sound_path: Path) -> None:
+        import winsound
+
+        winsound.PlaySound(
+            str(sound_path),
+            winsound.SND_FILENAME | winsound.SND_ASYNC,
+        )
 
     @staticmethod
     def _stop_platform_loop() -> None:

@@ -130,17 +130,20 @@ def main() -> None:
         microcontroller_interface=microcontroller_interface,
         sound_player=sound_player,
     )
-    try:
-        result = orchestrator.run_once()
-    except Exception as exc:
-        logger.exception("Puzzle run failed")
-        if not getattr(exc, "_puzzle_error_sound_played", False):
-            sound_player.play_unexpected_error(exc)
-        raise
-
-    logger.info("Puzzle run completed with result=%s", result)
-    sound_player.play_success()
-    print(result)
+    while True:
+        try:
+            result = orchestrator.run_once()
+            logger.info("Puzzle run completed with result=%s", result)
+            sound_player.play_success()
+            print(result)
+            if not config.runtime.loop:
+                break
+        except Exception as exc:
+            logger.exception("Puzzle run failed")
+            if not getattr(exc, "_puzzle_error_sound_played", False):
+                sound_player.play_unexpected_error(exc)
+            if not config.runtime.loop:
+                raise
 
 
 if __name__ == "__main__":
