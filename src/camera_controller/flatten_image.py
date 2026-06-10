@@ -72,7 +72,13 @@ def main() -> None:
         marker_ids=tuple(args.marker_ids),
         dictionary_name=args.dictionary,
         output_size=output_size,
-        corner_offset_percentages=corner_offset_percentages,
+        corner_offset_percentages=(
+            (0.0, 0.0),
+            (1.0, 0.2),
+            (0.1, 1.6),
+            (1.7, 0.2),
+        ),
+        # corner_offset_percentages=corner_offset_percentages,
     )
     print(result)
 

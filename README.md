@@ -24,6 +24,19 @@ export PYTHONPATH="src"
 python -m puzzle_orchestrator
 ```
 
+## ArUco benchmark
+
+Run the marker detection benchmark against a folder of sample images:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m camera_controller.benchmark_aruco ..\inputs --quiet
+```
+
+The benchmark compares the original single-pass detector with the robust
+multi-pass detector and reports any markers recovered from the known rectangular
+marker layout.
+
 ## Configuration
 
 The orchestrator is configured through `config.ini` in the repository root,

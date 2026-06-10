@@ -132,6 +132,7 @@ class CameraController:
         self,
         image: np.ndarray,
         dictionary_name: str,
+        required_marker_ids: tuple[int, ...] | None = None,
     ) -> tuple[object, list[np.ndarray], np.ndarray | None]:
         if not hasattr(cv2, "aruco"):
             raise RuntimeError("OpenCV ArUco module is not available")
@@ -142,21 +143,425 @@ class CameraController:
             raise ValueError(f"Unknown ArUco dictionary: {dictionary_name}")
 
         dictionary = aruco.getPredefinedDictionary(dictionary_id)
+        required_ids = (
+            set(required_marker_ids) if required_marker_ids is not None else None
+        )
+        attempts = (
+            (None, "bgr", "base"),
+            (1800, "bgr", "subpix"),
+            (1800, "gray", "subpix"),
+            (1800, "clahe", "const5"),
+            (1800, "sharp", "const5"),
+            (1800, "dark", "const5"),
+            (2200, "clahe", "const3"),
+        )
+
+        detected_marker_corners: dict[int, np.ndarray] = {}
+        detected_marker_ids: list[int] = []
+        for max_dimension, preprocessing_name, parameter_profile in attempts:
+            detection_image, scale = self._resize_for_aruco_detection(
+                image,
+                max_dimension,
+            )
+            prepared_image = self._prepare_aruco_detection_image(
+                detection_image,
+                preprocessing_name,
+            )
+            detector_parameters = self._create_aruco_detector_parameters(
+                aruco,
+                parameter_profile,
+            )
+            if hasattr(aruco, "ArucoDetector"):
+                detector = aruco.ArucoDetector(dictionary, detector_parameters)
+                corners, ids, _ = detector.detectMarkers(prepared_image)
+            else:
+                corners, ids, _ = aruco.detectMarkers(
+                    prepared_image,
+                    dictionary,
+                    parameters=detector_parameters,
+                )
+
+            if ids is None:
+                continue
+
+            for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
+                detected_marker_id = int(marker_id)
+                if required_ids is not None and detected_marker_id not in required_ids:
+                    continue
+                if detected_marker_id in detected_marker_corners:
+                    continue
+
+                original_scale_corner = marker_corner[0].astype(np.float32)
+                if scale != 1.0:
+                    original_scale_corner = original_scale_corner / scale
+                detected_marker_corners[detected_marker_id] = original_scale_corner
+                detected_marker_ids.append(detected_marker_id)
+
+            if required_ids is not None and required_ids.issubset(
+                detected_marker_corners
+            ):
+                break
+
+        if not detected_marker_ids:
+            return aruco, [], None
+
+        merged_corners = [
+            detected_marker_corners[marker_id].reshape((1, 4, 2)).astype(np.float32)
+            for marker_id in detected_marker_ids
+        ]
+        merged_ids = np.array(
+            [[marker_id] for marker_id in detected_marker_ids],
+            dtype=np.int32,
+        )
+        return aruco, merged_corners, merged_ids
+
+    @staticmethod
+    def _create_aruco_detector_parameters(
+        aruco: object,
+        profile: str,
+    ) -> object:
         detector_parameters = aruco.DetectorParameters()
         detector_parameters.adaptiveThreshWinSizeMin = 3
         detector_parameters.adaptiveThreshWinSizeMax = 41
         detector_parameters.adaptiveThreshWinSizeStep = 4
-        if hasattr(aruco, "ArucoDetector"):
-            detector = aruco.ArucoDetector(dictionary, detector_parameters)
-            corners, ids, _ = detector.detectMarkers(image)
-        else:
-            corners, ids, _ = aruco.detectMarkers(
-                image,
-                dictionary,
-                parameters=detector_parameters,
+
+        if profile == "base":
+            return detector_parameters
+
+        detector_parameters.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+        detector_parameters.cornerRefinementMaxIterations = 50
+        detector_parameters.cornerRefinementMinAccuracy = 0.03
+        detector_parameters.errorCorrectionRate = 0.8
+        detector_parameters.perspectiveRemovePixelPerCell = 8
+        detector_parameters.minOtsuStdDev = 3.0
+        detector_parameters.minDistanceToBorder = 1
+        detector_parameters.minCornerDistanceRate = 0.02
+
+        if profile == "const5":
+            detector_parameters.adaptiveThreshConstant = 5
+        elif profile == "const3":
+            detector_parameters.adaptiveThreshConstant = 3
+        elif profile != "subpix":
+            raise ValueError(f"Unknown ArUco detector parameter profile: {profile}")
+
+        return detector_parameters
+
+    @staticmethod
+    def _resize_for_aruco_detection(
+        image: np.ndarray,
+        max_dimension: int | None,
+    ) -> tuple[np.ndarray, float]:
+        if max_dimension is None:
+            return image, 1.0
+
+        height, width = image.shape[:2]
+        largest_dimension = max(height, width)
+        if largest_dimension <= max_dimension:
+            return image, 1.0
+
+        scale = max_dimension / largest_dimension
+        resized = cv2.resize(
+            image,
+            (round(width * scale), round(height * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+        return resized, scale
+
+    @staticmethod
+    def _prepare_aruco_detection_image(
+        image: np.ndarray,
+        preprocessing_name: str,
+    ) -> np.ndarray:
+        if preprocessing_name == "bgr":
+            return image
+
+        gray = (
+            cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            if image.ndim == 3
+            else image.copy()
+        )
+        if preprocessing_name == "gray":
+            return gray
+        if preprocessing_name == "clahe":
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            return clahe.apply(gray)
+        if preprocessing_name == "sharp":
+            blur = cv2.GaussianBlur(gray, (0, 0), 1.0)
+            return cv2.addWeighted(gray, 1.8, blur, -0.8, 0)
+        if preprocessing_name == "dark":
+            return cv2.convertScaleAbs(gray, alpha=1.5, beta=-35)
+
+        raise ValueError(f"Unknown ArUco preprocessing pass: {preprocessing_name}")
+
+    @staticmethod
+    def _marker_corners_by_id(
+        corners: list[np.ndarray],
+        ids: np.ndarray | None,
+    ) -> dict[int, np.ndarray]:
+        if ids is None:
+            return {}
+
+        detected_marker_corners: dict[int, np.ndarray] = {}
+        for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
+            detected_marker_corners[int(marker_id)] = marker_corner[0]
+        return detected_marker_corners
+
+    @classmethod
+    def _infer_missing_aruco_marker_corners(
+        cls,
+        detected_marker_corners: dict[int, np.ndarray],
+        marker_ids: tuple[int, int, int, int],
+        outer_corner_indices: tuple[int, int, int, int],
+    ) -> tuple[dict[int, np.ndarray], set[int]]:
+        missing_marker_ids = [
+            marker_id for marker_id in marker_ids if marker_id not in detected_marker_corners
+        ]
+        if len(missing_marker_ids) != 1:
+            return detected_marker_corners, set()
+
+        missing_marker_id = missing_marker_ids[0]
+        missing_index = marker_ids.index(missing_marker_id)
+        outer_points: dict[int, np.ndarray] = {}
+        for index, marker_id in enumerate(marker_ids):
+            marker_corners = detected_marker_corners.get(marker_id)
+            if marker_corners is not None:
+                outer_points[index] = marker_corners[outer_corner_indices[index]]
+
+        if len(outer_points) != 3:
+            return detected_marker_corners, set()
+
+        missing_outer_point = cls._infer_missing_outer_corner_from_marker_edges(
+            detected_marker_corners,
+            marker_ids,
+            outer_corner_indices,
+            missing_index,
+            outer_points,
+        )
+        if missing_outer_point is None:
+            missing_outer_point = cls._infer_missing_outer_corner_affine(
+                missing_index,
+                outer_points,
             )
 
-        return aruco, corners, ids
+        inferred_marker_corners = cls._synthetic_marker_corners_from_outer_corner(
+            missing_outer_point,
+            outer_corner_indices[missing_index],
+            detected_marker_corners.values(),
+        )
+        inferred_marker_map = dict(detected_marker_corners)
+        inferred_marker_map[missing_marker_id] = inferred_marker_corners
+        return inferred_marker_map, {missing_marker_id}
+
+    @classmethod
+    def _infer_missing_outer_corner_from_marker_edges(
+        cls,
+        detected_marker_corners: dict[int, np.ndarray],
+        marker_ids: tuple[int, int, int, int],
+        outer_corner_indices: tuple[int, int, int, int],
+        missing_index: int,
+        outer_points: dict[int, np.ndarray],
+    ) -> np.ndarray | None:
+        previous_index = (missing_index - 1) % 4
+        next_index = (missing_index + 1) % 4
+        previous_previous_index = (missing_index - 2) % 4
+        next_next_index = (missing_index + 2) % 4
+
+        previous_marker_corners = detected_marker_corners[marker_ids[previous_index]]
+        previous_marker_outer_index = outer_corner_indices[previous_index]
+        previous_known_side_line = cls._choose_marker_edge_line_toward_point(
+            previous_marker_corners,
+            previous_marker_outer_index,
+            outer_points[previous_previous_index],
+        )
+        previous_missing_side_line = cls._other_marker_edge_line(
+            previous_marker_corners,
+            previous_marker_outer_index,
+            previous_known_side_line,
+        )
+
+        next_marker_corners = detected_marker_corners[marker_ids[next_index]]
+        next_marker_outer_index = outer_corner_indices[next_index]
+        next_known_side_line = cls._choose_marker_edge_line_toward_point(
+            next_marker_corners,
+            next_marker_outer_index,
+            outer_points[next_next_index],
+        )
+        next_missing_side_line = cls._other_marker_edge_line(
+            next_marker_corners,
+            next_marker_outer_index,
+            next_known_side_line,
+        )
+
+        missing_outer_point = cls._intersect_lines(
+            previous_missing_side_line,
+            next_missing_side_line,
+        )
+        if missing_outer_point is None:
+            return None
+
+        affine_outer_point = cls._infer_missing_outer_corner_affine(
+            missing_index,
+            outer_points,
+        )
+        known_side_lengths = [
+            np.linalg.norm(
+                outer_points[index] - outer_points[(index + 1) % 4]
+            )
+            for index in outer_points
+            if (index + 1) % 4 in outer_points
+        ]
+        max_reasonable_error = (
+            max(12.0, min(40.0, max(known_side_lengths) * 0.04))
+            if known_side_lengths
+            else 40.0
+        )
+        if (
+            np.linalg.norm(missing_outer_point - affine_outer_point)
+            > max_reasonable_error
+        ):
+            return None
+
+        return missing_outer_point.astype(np.float32)
+
+    @staticmethod
+    def _infer_missing_outer_corner_affine(
+        missing_index: int,
+        outer_points: dict[int, np.ndarray],
+    ) -> np.ndarray:
+        if missing_index == 0:
+            return outer_points[1] + outer_points[3] - outer_points[2]
+        if missing_index == 1:
+            return outer_points[0] + outer_points[2] - outer_points[3]
+        if missing_index == 2:
+            return outer_points[1] + outer_points[3] - outer_points[0]
+        return outer_points[0] + outer_points[2] - outer_points[1]
+
+    @classmethod
+    def _choose_marker_edge_line_toward_point(
+        cls,
+        marker_corners: np.ndarray,
+        outer_corner_index: int,
+        target_point: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        candidate_lines = cls._outer_marker_edge_lines(
+            marker_corners,
+            outer_corner_index,
+        )
+        return min(
+            candidate_lines,
+            key=lambda line: cls._point_to_line_distance(target_point, line),
+        )
+
+    @classmethod
+    def _other_marker_edge_line(
+        cls,
+        marker_corners: np.ndarray,
+        outer_corner_index: int,
+        known_line: tuple[np.ndarray, np.ndarray],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        candidate_lines = cls._outer_marker_edge_lines(
+            marker_corners,
+            outer_corner_index,
+        )
+        if np.array_equal(candidate_lines[0][1], known_line[1]):
+            return candidate_lines[1]
+        return candidate_lines[0]
+
+    @staticmethod
+    def _outer_marker_edge_lines(
+        marker_corners: np.ndarray,
+        outer_corner_index: int,
+    ) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+        corners = np.asarray(marker_corners, dtype=np.float32)
+        outer_corner = corners[outer_corner_index]
+        previous_corner = corners[(outer_corner_index - 1) % 4]
+        next_corner = corners[(outer_corner_index + 1) % 4]
+        return (outer_corner, previous_corner), (outer_corner, next_corner)
+
+    @staticmethod
+    def _point_to_line_distance(
+        point: np.ndarray,
+        line: tuple[np.ndarray, np.ndarray],
+    ) -> float:
+        line_start, line_end = line
+        line_vector = line_end - line_start
+        line_length = np.linalg.norm(line_vector)
+        if line_length == 0:
+            return float("inf")
+        return float(
+            abs(CameraController._cross_2d(line_vector, point - line_start))
+            / line_length
+        )
+
+    @staticmethod
+    def _intersect_lines(
+        first_line: tuple[np.ndarray, np.ndarray],
+        second_line: tuple[np.ndarray, np.ndarray],
+    ) -> np.ndarray | None:
+        first_start, first_end = first_line
+        second_start, second_end = second_line
+        first_direction = first_end - first_start
+        second_direction = second_end - second_start
+        denominator = CameraController._cross_2d(
+            first_direction,
+            second_direction,
+        )
+        if abs(denominator) < 1e-6:
+            return None
+
+        offset = second_start - first_start
+        factor = CameraController._cross_2d(offset, second_direction) / denominator
+        return first_start + factor * first_direction
+
+    @staticmethod
+    def _cross_2d(first_vector: np.ndarray, second_vector: np.ndarray) -> float:
+        return float(
+            first_vector[0] * second_vector[1]
+            - first_vector[1] * second_vector[0]
+        )
+
+    @staticmethod
+    def _synthetic_marker_corners_from_outer_corner(
+        outer_point: np.ndarray,
+        outer_corner_index: int,
+        known_marker_corners: object,
+    ) -> np.ndarray:
+        right_vectors: list[np.ndarray] = []
+        down_vectors: list[np.ndarray] = []
+        for marker_corners in known_marker_corners:
+            corners = np.asarray(marker_corners, dtype=np.float32)
+            right_vectors.extend((corners[1] - corners[0], corners[2] - corners[3]))
+            down_vectors.extend((corners[3] - corners[0], corners[2] - corners[1]))
+
+        right_vector = np.mean(np.array(right_vectors), axis=0)
+        down_vector = np.mean(np.array(down_vectors), axis=0)
+        outer = np.asarray(outer_point, dtype=np.float32)
+
+        if outer_corner_index == 0:
+            top_left = outer
+            top_right = outer + right_vector
+            bottom_right = outer + right_vector + down_vector
+            bottom_left = outer + down_vector
+        elif outer_corner_index == 1:
+            top_left = outer - right_vector
+            top_right = outer
+            bottom_right = outer + down_vector
+            bottom_left = outer - right_vector + down_vector
+        elif outer_corner_index == 2:
+            top_left = outer - right_vector - down_vector
+            top_right = outer - down_vector
+            bottom_right = outer
+            bottom_left = outer - right_vector
+        else:
+            top_left = outer - down_vector
+            top_right = outer + right_vector - down_vector
+            bottom_right = outer + right_vector
+            bottom_left = outer
+
+        return np.array(
+            [top_left, top_right, bottom_right, bottom_left],
+            dtype=np.float32,
+        )
 
     def mark_aruco_markers(
         self,
@@ -226,14 +631,34 @@ class CameraController:
         if image is None:
             raise RuntimeError(f"Unable to read image for flattening: {source_path}")
 
-        _, corners, ids = self._detect_aruco_markers(image, dictionary_name)
+        _, corners, ids = self._detect_aruco_markers(
+            image,
+            dictionary_name,
+            required_marker_ids=marker_ids,
+        )
 
         if ids is None:
             raise ArucoMarkersError("No ArUco markers detected in image")
 
-        detected_marker_corners: dict[int, np.ndarray] = {}
-        for marker_corner, marker_id in zip(corners, ids.flatten(), strict=False):
-            detected_marker_corners[int(marker_id)] = marker_corner[0]
+        detected_marker_corners = self._marker_corners_by_id(corners, ids)
+
+        # OpenCV returns ArUco corners in marker order:
+        # top-left, top-right, bottom-right, bottom-left.
+        # The markers are passed in rectangle order, so pick the outer corner of
+        # each marker instead of the marker center.
+        outer_corner_indices = (3, 0, 2, 2)
+        detected_marker_corners, inferred_marker_ids = (
+            self._infer_missing_aruco_marker_corners(
+                detected_marker_corners,
+                marker_ids,
+                outer_corner_indices,
+            )
+        )
+        if inferred_marker_ids:
+            logger.warning(
+                "Inferred missing ArUco marker corners from geometry: %s",
+                sorted(inferred_marker_ids),
+            )
 
         missing_marker_ids = [
             marker_id for marker_id in marker_ids if marker_id not in detected_marker_corners
@@ -243,11 +668,6 @@ class CameraController:
                 f"Missing required ArUco markers: {missing_marker_ids}"
             )
 
-        # OpenCV returns ArUco corners in marker order:
-        # top-left, top-right, bottom-right, bottom-left.
-        # The markers are passed in rectangle order, so pick the outer corner of
-        # each marker instead of the marker center.
-        outer_corner_indices = (3, 0, 2, 2)
         source_points = np.array(
             [
                 detected_marker_corners[marker_id][corner_index]
