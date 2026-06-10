@@ -131,6 +131,17 @@ To allow access to /dev/serial0:
 - Enable Serial Port
 - `ls -l /dev/ttyS0` should print `rw` for group
 
+### Sound via GPIO
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+Add:
+```
+dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4
+```
+Then Reboot 
+
 ## IP Adresses
 RaspberryPi: 192.168.50.2
 GoPro: 10.5.5.9
@@ -142,4 +153,50 @@ Port: /dev/serial0
 GPIO Pins (Default): Send 8 (GPIO14), Recieve 10 (GPIO15)
 
 ## Auto Start
-[Source](https://chatgpt.com/g/g-p-68f68d8f44a88191a5cd2a513eda9ccf/c/6a1587f9-4214-8331-a59b-d4fc86123a80)
+Autosart des Programms auf dem Raspi aufsetzen:
+```bash
+sudo nano /etc/systemd/system/puzzle-orchestrator.service
+```
+
+Paste:
+```INI
+[Unit]
+Description=Puzzle Orchestrator
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Documents
+Environment=PYTHONPATH=/home/pi/Documents/src
+ExecStart=/usr/bin/python3 -m puzzle_orchestrator
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable puzzle-orchestrator.service
+sudo systemctl start puzzle-orchestrator.service
+```
+
+Check if Service is running:
+```bash
+systemctl status puzzle-orchestrator.service
+```
+
+View Logs:
+```bash
+journalctl -u puzzle-orchestrator.service -f
+```
+
+Stop Service:
+```bash
+sudo systemctl stop puzzle-orchestrator.service
+```
+
+https://chatgpt.com/g/g-p-68f68d8f44a88191a5cd2a513eda9ccf/c/6a1587f9-4214-8331-a59b-d4fc86123a80
