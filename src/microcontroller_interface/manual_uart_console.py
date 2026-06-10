@@ -76,6 +76,7 @@ class ManualUartConsole:
             "H": SimpleSendCommand.HOLD_ON,
             "h": SimpleSendCommand.HOLD_OFF,
             "R": SimpleSendCommand.RESET,
+            "s": SimpleSendCommand.SHAKE,
         }
         return mapping.get(raw)
 

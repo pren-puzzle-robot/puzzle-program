@@ -18,6 +18,7 @@ class SimpleSendCommand(Enum):
     HOLD_ON = "H"
     HOLD_OFF = "h"
     RESET = "R"
+    SHAKE = "s"
 
 
 class ReceiveCommandCode(Enum):

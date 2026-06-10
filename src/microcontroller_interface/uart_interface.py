@@ -274,6 +274,8 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
 
             self._run_pick_and_place_sequence(start_move, end_move)
 
+        # self._send_transport_command(SimpleSendCommand.SHAKE)
+
         result = f"sent_{len(machine_points)}_pick_and_place_sequences_over_uart"
         logger.info("UART send completed with result=%s", result)
         return result
@@ -309,13 +311,13 @@ class UartMicrocontrollerInterface(MicrocontrollerInterface):
             self._send_transport_command(command)
             # Sleep olny on Hold Off
             if command is SimpleSendCommand.HOLD_OFF:
-                time.sleep(1.5)
+                time.sleep(.7)
             elif command is SimpleSendCommand.HOLD_ON:
-                time.sleep(2)
+                time.sleep(.3)
             elif command is SimpleSendCommand.LIFT:
-                time.sleep(1)
+                time.sleep(.2)
             else:
-                time.sleep(0.3)
+                time.sleep(0.1)
 
     def _send_transport_command(self, command: MoveCommand | SimpleSendCommand) -> None:
         if isinstance(command, MoveCommand):
